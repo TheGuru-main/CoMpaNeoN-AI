@@ -449,5 +449,3 @@ async def startup_event():
     Base.metadata.create_all(bind=engine) # Safe execution space
     start_background_training()
 
-# Serve frontend
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
