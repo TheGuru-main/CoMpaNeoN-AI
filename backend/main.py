@@ -3,7 +3,7 @@ import json
 import asyncio
 import torch
 import torch.nn.functional as F
-from fastapi import FastAPI, HTTPException, Depends, APIRouter, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from database import engine, SessionLocal, Base
 from db_models import User, Workspace, Message, APIKey
 from ai_model import MiniCompanionAI
 from auth import get_current_user, hash_password, verify_password, create_access_token, validate_phone, compute_user_cell, get_db
-from api_auth import verify_api_key, rate_limiter, create_api_key
+from api_auth import verify_api_key, rate_limiter
 from tokenizer import tokenize, normalize_lang, grid_dims, supported_languages
 from memory_grid import MemoryGrid
 from grid_crawler import crawl as grid_crawl
@@ -33,6 +33,7 @@ from BubbleJumbo_rules import BubbleJumboRules
 from word_understanding import WordUnderstanding
 from summary import generate_summary as generate_ai_summary
 from follow_up import generate_follow_ups
+from message import send_message, get_conversations, get_messages_between, DirectMessage
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -76,7 +77,7 @@ def load_model_if_exists():
 
 load_model_if_exists()
 
-# Helper functions
+# Helpers
 def encode_text(text: str, lang: str = "en") -> List[int]:
     tokens = tokenize(text, lang)
     ids = [tokenizer_vocab.get("<start>", 2)]
@@ -90,12 +91,24 @@ def decode_ids(ids: List[int]) -> str:
     return ' '.join([reverse_vocab.get(i, '<unk>') for i in ids if i not in {0,2,3}])
 
 def get_context_from_memory(query: str) -> str:
-    cached = memory_cache.get(query)
-    if cached:
-        return cached
-    context = word_understanding.get_context(query)
-    memory_cache.set(query, context)
-    return context
+    return word_understanding.get_context(query)
+
+def generate_from_prompt(prompt: str, max_len: int, temperature: float) -> str:
+    if model is not None and tokenizer_vocab is not None:
+        input_ids = torch.tensor([encode_text(prompt)], dtype=torch.long).to(device)
+        output_ids = []
+        with torch.no_grad():
+            for _ in range(max_len):
+                logits = model(input_ids)[0, -1, :] / temperature
+                probs = F.softmax(logits, dim=-1)
+                next_id = torch.multinomial(probs, 1).item()
+                output_ids.append(next_id)
+                input_ids = torch.cat([input_ids, torch.tensor([[next_id]], device=device)], dim=1)
+                if next_id == tokenizer_vocab.get("<end>", 3):
+                    break
+        return decode_ids(output_ids)
+    else:
+        return prompt
 
 # Pydantic models
 class SignupRequest(BaseModel):
@@ -146,13 +159,17 @@ class FollowUpRequest(BaseModel):
     query: str
     answer: str
 
+class DirectMessageRequest(BaseModel):
+    recipient_phone: str
+    content: str
+
 # Auth endpoints
 @app.post("/auth/signup")
 async def signup(req: SignupRequest):
     db = SessionLocal()
     try:
         if not validate_phone(req.phone, req.country[:2].upper()):
-            raise HTTPException(400, "Invalid phone number. Must start with '+' and follow country length.")
+            raise HTTPException(400, "Invalid phone number.")
         existing = db.query(User).filter(User.phone == req.phone).first()
         if existing:
             raise HTTPException(400, "Phone already registered")
@@ -215,7 +232,7 @@ async def list_workspaces(user: User = Depends(get_current_user)):
         db.close()
 
 @app.post("/workspace/{ws_id}/message")
-async def add_message(ws_id: str, req: MessageRequest, user: User = Depends(get_current_user)):
+async def add_workspace_message(ws_id: str, req: MessageRequest, user: User = Depends(get_current_user)):
     db = SessionLocal()
     try:
         msg = Message(workspace_id=ws_id, user_id=user.id, role="user", content=req.content)
@@ -253,23 +270,6 @@ async def generate_in_workspace(ws_id: str, req: GenerateRequest, user: User = D
         db.close()
 
 # General generation
-def generate_from_prompt(prompt: str, max_len: int, temperature: float) -> str:
-    if model is not None and tokenizer_vocab is not None:
-        input_ids = torch.tensor([encode_text(prompt)], dtype=torch.long).to(device)
-        output_ids = []
-        with torch.no_grad():
-            for _ in range(max_len):
-                logits = model(input_ids)[0, -1, :] / temperature
-                probs = F.softmax(logits, dim=-1)
-                next_id = torch.multinomial(probs, 1).item()
-                output_ids.append(next_id)
-                input_ids = torch.cat([input_ids, torch.tensor([[next_id]], device=device)], dim=1)
-                if next_id == tokenizer_vocab.get("<end>", 3):
-                    break
-        return decode_ids(output_ids)
-    else:
-        return prompt  # fallback
-
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     context = get_context_from_memory(req.prompt)
@@ -340,7 +340,7 @@ async def crawl_web(req: CrawlRequest):
 async def train(req: TrainRequest):
     from train import train as do_train
     await asyncio.to_thread(do_train, epochs=req.epochs, batch_size=req.batch_size)
-    load_model_if_exists()  # reload model after training
+    load_model_if_exists()
     return {"message": "Training completed"}
 
 # Summary
@@ -355,6 +355,26 @@ async def follow_up(req: FollowUpRequest):
     domain = detect_domain(req.query)
     follow_ups = generate_follow_ups(req.query, req.answer, domain)
     return {"follow_ups": follow_ups}
+
+# Direct messaging endpoints (internal)
+@app.post("/api/messages/send")
+async def send_direct_message(req: DirectMessageRequest, user: User = Depends(get_current_user)):
+    try:
+        msg = send_message(user.phone, req.recipient_phone, req.content)
+        return {"id": msg.id, "sender": msg.sender_phone, "recipient": msg.recipient_phone,
+                "content": msg.content, "created_at": msg.created_at.isoformat()}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@app.get("/api/messages/conversations")
+async def list_conversations(user: User = Depends(get_current_user)):
+    return get_conversations(user.phone)
+
+@app.get("/api/messages/with/{other_phone}")
+async def get_messages(other_phone: str, user: User = Depends(get_current_user)):
+    msgs = get_messages_between(user.phone, other_phone)
+    return [{"id": m.id, "sender": m.sender_phone, "recipient": m.recipient_phone,
+             "content": m.content, "created_at": m.created_at.isoformat()} for m in msgs]
 
 # Public API endpoints (indexer, crawler, tokenizer, general AI)
 @app.post("/api/v1/public/tokenize")
@@ -393,7 +413,6 @@ async def public_generate(req: GenerateRequest, api_key: str = Depends(verify_ap
 
 @app.post("/api/v1/public/predict")
 async def public_predict(req: PredictRequest, api_key: str = Depends(verify_api_key)):
-    # Reuse predict logic
     return await predict(req)
 
 @app.post("/api/v1/public/research")
@@ -409,5 +428,5 @@ async def public_train(req: TrainRequest, api_key: str = Depends(verify_api_key)
 async def startup_event():
     start_background_training()
 
-# Serve frontend (assuming built frontend in ../frontend)
+# Serve frontend
 app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
