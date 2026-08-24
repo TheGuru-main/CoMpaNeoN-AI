@@ -2,6 +2,7 @@ fastapi==0.115.6
 uvicorn==0.32.1
 sqlalchemy==2.0.43
 psycopg[binary]==3.2.13
+asyncpg
 python-dotenv==1.0.1
 pydantic-settings==2.6.1
 passlib[bcrypt]==1.7.4
