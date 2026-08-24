@@ -427,6 +427,3 @@ async def public_train(req: TrainRequest, api_key: str = Depends(verify_api_key)
 @app.on_event("startup")
 async def startup_event():
     start_background_training()
-
-# Serve frontend
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
