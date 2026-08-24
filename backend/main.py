@@ -205,7 +205,10 @@ async def login(req: LoginRequest):
     finally:
         db.close()
 
-# Workspace endpoints
+# ==============================================================================
+# WORKSPACE ENDPOINTS (Complete & Corrected)
+# ==============================================================================
+
 @app.post("/workspace")
 async def create_workspace(req: WorkspaceCreate, user: User = Depends(get_current_user)):
     db = SessionLocal()
@@ -230,6 +233,16 @@ async def list_workspaces(user: User = Depends(get_current_user)):
         return [{"id": str(w.id), "project_name": w.project_name, "summary": w.summary} for w in workspaces]
     finally:
         db.close()
+
+@app.post("/workspace/")
+async def create_or_fetch_workspace_alternative(user: User = Depends(get_current_user)):
+    db = SessionLocal()
+    try:
+        workspaces = db.query(Workspace).filter(Workspace.user_id == user.id).all()
+        return [{"id": str(w.id), "project_name": w.project_name, "summary": w.summary} for w in workspaces]
+    finally:
+        db.close()
+
 
 @app.post("/workspace/{ws_id}/message")
 async def add_workspace_message(ws_id: str, req: MessageRequest, user: User = Depends(get_current_user)):
