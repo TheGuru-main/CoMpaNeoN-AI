@@ -6,17 +6,17 @@ class MemoryGrid:
         self.rows = rows
         self.cols = cols
         self.grid = [[[] for _ in range(cols)] for _ in range(rows)]
-        self.doc_store = []  # full original strings for context
+        self.doc_store = []
 
-    def _cell(self, token_info: dict) -> tuple[int, int]:
+    def _cell(self, token_info: dict) -> tuple:
         L = token_info['word']['L']
-        S = token_info['word']['word_S']  # same as tokenizer
-        c = token_info['word']['col']     # first letter index
+        S = token_info['word']['word_S']
+        c = token_info['word']['col']
         row = ((L + S - 1) % self.rows) + 1
         col = c % self.cols
-        return row-1, col   # zero-indexed storage
+        return row-1, col
 
-    def add_document(self, text: str, lang: str = "en", source: str = ""):
+    def add_document(self, text: str, lang: str = "en", source: str = "") -> int:
         tokens = tokenize(text, lang)
         doc_id = len(self.doc_store)
         self.doc_store.append({"text": text, "source": source, "tokens": tokens})
@@ -31,13 +31,17 @@ class MemoryGrid:
             })
         return doc_id
 
-    def get_tokens_at(self, row: int, col: int) -> List[Dict[str, Any]]:
+    def get_tokens_at(self, row: int, col: int) -> List[Dict]:
         row = (row - 1) % self.rows
         col = col % self.cols
         return self.grid[row][col]
 
     def get_doc(self, doc_id: int) -> str:
-        return self.doc_store[doc_id]['text'] if doc_id < len(self.doc_store) else ""
+        if doc_id < len(self.doc_store):
+            return self.doc_store[doc_id]['text']
+        return ""
 
     def get_doc_tokens(self, doc_id: int) -> list:
-        return self.doc_store[doc_id]['tokens'] if doc_id < len(self.doc_store) else []
+        if doc_id < len(self.doc_store):
+            return self.doc_store[doc_id]['tokens']
+        return []
