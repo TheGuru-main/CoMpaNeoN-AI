@@ -15,6 +15,8 @@ class User(Base):
     country = Column(String(100), default="Nigeria")
     temperament = Column(String(20), default="sanguine")
     settings = Column(JSON, default={})
+    start_row = Column(Integer, nullable=False)  # message box start row
+    start_col = Column(Integer, nullable=False)  # column from first letter
     created_at = Column(DateTime, default=datetime.utcnow)
 
     workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
