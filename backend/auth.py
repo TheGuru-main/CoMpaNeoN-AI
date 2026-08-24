@@ -31,19 +31,30 @@ def create_access_token(user_id: str):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def validate_phone(phone: str, country_code: str = "NG") -> bool:
+    """Validate phone number: starts with '+', no leading zero after '+', correct length."""
     if not phone.startswith("+"):
         return False
     digits = phone[1:]
     if digits.startswith("0"):
         return False
-    lengths = {"NG": 13, "GH": 12, "US": 11, "IN": 12, "GB": 12}
-    expected = lengths.get(country_code)
-    if expected and len(digits) != expected:
+    lengths = {
+        "NG": 13,   # +234 + 10 digits = 13 digits total after '+'
+        "GH": 12,   # +233 + 9 digits
+        "US": 11,   # +1 + 10 digits
+        "IN": 12,   # +91 + 10 digits
+        "GB": 12,   # +44 + 10 digits
+    }
+    expected = lengths.get(country_code, None)
+    if expected is not None and len(digits) != expected:
         return False
     return True
 
 def compute_user_cell(full_name: str, phone: str):
-    """Compute start row and column for user's message box."""
+    """
+    Compute the user's message box start row and column.
+    L = name length, S = digit sum of phone UID, c = first letter index.
+    start_row = ((L+S-1) % 64) + 1, start_col = c % 26.
+    """
     clean_name = re.sub(r'[^a-zA-Z]', '', full_name)
     L = len(clean_name)
     S = sum(int(d) for d in phone if d.isdigit())
