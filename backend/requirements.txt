@@ -14,9 +14,6 @@ pydantic-settings==2.6.1
 pydantic==2.10.4
 
 # Authentication and security
-passlib[bcrypt]==1.7.4
-
-# Replace python-jose with PyJWT
 PyJWT==2.10.1
 
 bcrypt==4.2.1
