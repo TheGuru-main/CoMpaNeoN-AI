@@ -1,0 +1,43 @@
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Boolean, JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
+from database import Base
+import uuid
+from datetime import datetime
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    phone = Column(String(20), unique=True, nullable=False)
+    full_name = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    language = Column(String(10), default="en")
+    country = Column(String(100), default="Nigeria")
+    temperament = Column(String(20), default="sanguine")
+    settings = Column(JSON, default={})
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    project_name = Column(String(255), nullable=False)
+    summary = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="workspaces")
+    messages = relationship("Message", back_populates="workspace", cascade="all, delete-orphan")
+
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    role = Column(String(20), nullable=False)   # "user" or "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    workspace = relationship("Workspace", back_populates="messages")
