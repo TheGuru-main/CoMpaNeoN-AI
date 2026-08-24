@@ -1,5 +1,5 @@
 """
-Word Understanding Module (updated)
+Word Understanding Module
 
 Combines:
 - Letter and word tokenizer
@@ -7,7 +7,7 @@ Combines:
 - Directive detection
 - Symbol recognition
 - Code term enrichment
-- Content caching for context
+- Candidate ranking for best context
 """
 
 import hashlib
@@ -20,6 +20,9 @@ from code_languages import CODE_TERMS
 from directives import detect_directive
 from page_cache import PageCache
 from memory_cache import MemoryCache
+from ranking import score_candidate
+from intent_analyzer import detect_domain
+
 
 class WordUnderstanding:
     def __init__(self, memory_grid: MemoryGrid):
@@ -31,7 +34,7 @@ class WordUnderstanding:
         return hashlib.sha256(text.encode()).hexdigest()
 
     def get_context(self, query: str, lang: str = "en", limit: int = 10) -> str:
-        # Check memory cache first (no TTL)
+        """Retrieve and rank context from memory grid for a query."""
         cached = self.memory_cache.get(query)
         if cached:
             return cached
@@ -41,11 +44,7 @@ class WordUnderstanding:
             return ""
 
         directive = detect_directive(query)
-        # Adjust grid crawl based on directive (simplified: adjust limit)
-        if directive in {"entity_identity", "location"}:
-            crawl_limit = limit + 2
-        else:
-            crawl_limit = limit
+        crawl_limit = limit + 2 if directive in {"entity_identity", "location"} else limit
 
         first = tokens[0]
         L = first["word"]["L"]
@@ -55,18 +54,42 @@ class WordUnderstanding:
         start_col = c % 26
 
         results = grid_crawl(self.memory, start_row, start_col, limit=crawl_limit)
-        context_parts = []
+
+        # Collect candidate documents with their text
+        candidate_docs = []
+        seen_doc_ids = set()
         for r in results:
-            doc_id = r["doc_id"]
+            doc_id = r.get("doc_id")
+            if doc_id in seen_doc_ids:
+                continue
+            seen_doc_ids.add(doc_id)
             doc_text = self.memory.get_doc(doc_id)
             if doc_text:
-                context_parts.append(doc_text)
+                candidate_docs.append({"doc_id": doc_id, "text": doc_text})
 
-        context = "\n".join(dict.fromkeys(context_parts[:3]))
+        # Rank candidates using the scoring rubric
+        domain = detect_domain(query)
+        ranked = []
+        for doc in candidate_docs:
+            score_result = score_candidate(
+                query,
+                doc["text"],
+                query_entities=[],
+                query_hierarchy=domain,
+                candidate_entities=[],
+                candidate_hierarchy=domain,
+                freshness_score=0.0,
+            )
+            ranked.append((score_result["total"], doc["text"]))
+
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        context = "\n".join([text for _, text in ranked[:3]])
+
         self.memory_cache.set(query, context)
         return context
 
     def score_candidate(self, query: str, doc_text: str, lang: str = "en") -> float:
+        """Return combined lexical score for a candidate document."""
         q_tokens = tokenize(query, lang)
         if not q_tokens:
             return 0.0
