@@ -1,14 +1,34 @@
+# Web framework and server
 fastapi==0.115.6
-uvicorn==0.32.1
+uvicorn[standard]==0.32.1
+gunicorn==22.0.0
+
+# Database
 sqlalchemy==2.0.43
 psycopg[binary]==3.2.13
-asyncpg
+asyncpg==0.29.0
+
+# Configuration and validation
 python-dotenv==1.0.1
 pydantic-settings==2.6.1
+pydantic==2.10.4
+
+# Authentication and security
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-jose[cryptography]==3.3.0
+
+# HTTP client
 httpx==0.27.2
+
+# Rate limiting
 slowapi==0.1.9
-torch
-beautifulsoup4
+
+# Machine learning
+torch==2.5.1
+
+# Web scraping
+beautifulsoup4==4.12.3
+
+# File uploads (for future)
+python-multipart==0.0.17
