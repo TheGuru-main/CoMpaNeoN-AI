@@ -21,7 +21,6 @@ class MultiHeadAttention(nn.Module):
         q = self.q_linear(q).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1,2)
         k = self.k_linear(k).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1,2)
         v = self.v_linear(v).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1,2)
-
         scores = torch.matmul(q, k.transpose(-2,-1)) / self.scale
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
@@ -35,12 +34,7 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.attn = MultiHeadAttention(d_model, n_heads)
         self.norm1 = nn.LayerNorm(d_model)
-        self.ff = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.ReLU(),
-            nn.Linear(d_ff, d_model),
-            nn.Dropout(dropout)
-        )
+        self.ff = nn.Sequential(nn.Linear(d_model, d_ff), nn.ReLU(), nn.Linear(d_ff, d_model), nn.Dropout(dropout))
         self.norm2 = nn.LayerNorm(d_model)
 
     def forward(self, x, mask=None):
@@ -50,15 +44,13 @@ class TransformerBlock(nn.Module):
         x = self.norm2(x + ff_out)
         return x
 
-class MiniCodeAI(nn.Module):
+class MiniCompanionAI(nn.Module):
     def __init__(self, vocab_size, d_model=128, n_heads=4, n_layers=2, max_len=512, d_ff=256):
         super().__init__()
         self.d_model = d_model
         self.token_embedding = nn.Embedding(vocab_size, d_model)
         self.position_embedding = nn.Embedding(max_len, d_model)
-        self.blocks = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff) for _ in range(n_layers)
-        ])
+        self.blocks = nn.ModuleList([TransformerBlock(d_model, n_heads, d_ff) for _ in range(n_layers)])
         self.ln_final = nn.LayerNorm(d_model)
         self.fc_out = nn.Linear(d_model, vocab_size)
 
