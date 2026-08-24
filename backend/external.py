@@ -2,24 +2,17 @@ import os
 import httpx
 from typing import Optional, List, Dict, Any
 
-# -------------------------------
-# Dictionary
-# -------------------------------
 async def fetch_dictionary(word: str) -> dict:
     url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(url)
             if resp.status_code == 200:
-                data = resp.json()
-                return {"definitions": data[0].get("meanings", [])}
+                return {"definitions": resp.json()[0].get("meanings", [])}
             return {"definitions": []}
         except Exception as e:
             return {"definitions": [], "error": str(e)}
 
-# -------------------------------
-# News (GNews)
-# -------------------------------
 async def fetch_news(query: str) -> dict:
     api_key = os.getenv("GNEWS_API_KEY")
     if not api_key:
@@ -29,23 +22,21 @@ async def fetch_news(query: str) -> dict:
         try:
             resp = await client.get(url)
             if resp.status_code == 200:
-                data = resp.json()
-                return {"articles": data.get("articles", [])}
+                return {"articles": resp.json().get("articles", [])}
             return {"articles": []}
         except Exception as e:
             return {"articles": [], "error": str(e)}
 
-# -------------------------------
-# Books (Open Library)
-# -------------------------------
-async def fetch_books(query: str) -> dict:
-    url = f"https://openlibrary.org/search.json?q={query}&limit=5"
+async def fetch_books(query: str, category: str = "") -> dict:
+    """Fetch books from Open Library, optionally filtered by subject."""
+    base = f"https://openlibrary.org/search.json?q={query}&limit=5"
+    if category:
+        base += f"&subject={category}"
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(url)
+            resp = await client.get(base)
             if resp.status_code == 200:
-                data = resp.json()
-                docs = data.get("docs", [])
+                docs = resp.json().get("docs", [])
                 books = [
                     {
                         "title": d.get("title"),
@@ -59,18 +50,17 @@ async def fetch_books(query: str) -> dict:
         except Exception as e:
             return {"books": [], "error": str(e)}
 
-# -------------------------------
-# E‑library (Google Books)
-# -------------------------------
-async def fetch_elibrary(query: str) -> dict:
-    url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5"
+async def fetch_elibrary(query: str, category: str = "") -> dict:
+    """Fetch from Google Books, optionally filtered by category."""
+    base = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5"
+    if category:
+        base += f"&subject={category}"
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(url)
+            resp = await client.get(base)
             if resp.status_code == 200:
-                data = resp.json()
-                items = data.get("items", [])
-                ebooks = [
+                items = resp.json().get("items", [])
+                books = [
                     {
                         "title": it["volumeInfo"].get("title"),
                         "authors": ", ".join(it["volumeInfo"].get("authors", [])) if it["volumeInfo"].get("authors") else "Unknown",
@@ -78,19 +68,14 @@ async def fetch_elibrary(query: str) -> dict:
                     }
                     for it in items
                 ]
-                return {"elibrary": ebooks}
+                return {"elibrary": books}
             return {"elibrary": []}
         except Exception as e:
             return {"elibrary": [], "error": str(e)}
 
-# -------------------------------
-# Wikipedia (Search + Summary)
-# -------------------------------
-WIKI_SEARCH_URL = "https://en.wikipedia.org/w/api.php"
-WIKI_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/"
-
 async def fetch_wikipedia(query: str, lang: str = "en", limit: int = 3) -> dict:
-    # Step 1: search for article titles
+    WIKI_SEARCH_URL = "https://en.wikipedia.org/w/api.php"
+    WIKI_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/"
     params = {
         "action": "query",
         "list": "search",
@@ -106,8 +91,6 @@ async def fetch_wikipedia(query: str, lang: str = "en", limit: int = 3) -> dict:
                 return {"articles": []}
             data = resp.json()
             titles = [r["title"] for r in data.get("query", {}).get("search", [])]
-
-            # Step 2: get summaries
             articles = []
             for title in titles:
                 try:
