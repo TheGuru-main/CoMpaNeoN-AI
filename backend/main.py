@@ -326,14 +326,20 @@ async def research(req: ResearchRequest):
     search_cache.set(query, data)
     return data
 
+
 # Crawl
 @app.post("/crawl")
 async def crawl_web(req: CrawlRequest):
     text = web_crawler.crawl(req.url)
     doc_id = memory.add_document(text, "en", source=req.url)
+    
+    # Securely create the folder if it doesn't exist to avoid FileNotFoundError
+    os.makedirs('data', exist_ok=True)
     with open('data/web_words.txt', 'a', encoding='utf-8') as f:
         f.write(text + '\n')
+        
     return {"message": "Crawled", "doc_id": doc_id, "words": len(text.split())}
+
 
 # Train
 @app.post("/train")
