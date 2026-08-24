@@ -1,4 +1,7 @@
+import re
+
 DOMAIN_KEYWORDS = {
+   "code": ["def", "class", "import", "function", "return", "if", "else", "loop", "variable", "algorithm", "debug", "compiler", "library", "API", "database", "framework", "python", "javascript", "java", "C++", "C#", "ruby", "php", "sql", "html", "css"],
     "medical":     ["diagnosis","treatment","symptom","surgery","disease","patient","clinical","pharmacy","drug"],
     "legal":       ["law","court","attorney","legal","statute","regulation","compliance","lawsuit","judge"],
     "education":   ["homework","explain","definition","learn","teach","curriculum","classroom","student","school"],
