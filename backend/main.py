@@ -29,14 +29,17 @@ from memory_cache import MemoryCache
 from background_training import start_background_training
 from rules import enforce_rules
 from BubbleJumbo_rules import BubbleJumboRules
+from word_understanding import WordUnderstanding
 
-# Create tables
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="CoMpaNeoN AI", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Global components
 model: Optional[MiniCompanionAI] = None
 tokenizer_vocab: Optional[Dict[str, int]] = None
 reverse_vocab: Optional[Dict[int, str]] = None
@@ -47,6 +50,7 @@ mixer = DataMixer()
 search_cache = SearchCache(ttl_seconds=300)
 memory_cache = MemoryCache()
 bubble_rules = BubbleJumboRules()
+word_understanding = WordUnderstanding(memory)
 
 # Load model if exists
 def load_model_if_exists():
@@ -69,7 +73,7 @@ def load_model_if_exists():
 
 load_model_if_exists()
 
-# Helper functions
+# Helpers
 def encode_text(text: str, lang: str = "en") -> List[int]:
     tokens = tokenize(text, lang)
     ids = [tokenizer_vocab.get("<start>", 2)]
@@ -86,23 +90,7 @@ def get_context_from_memory(query: str) -> str:
     cached = memory_cache.get(query)
     if cached:
         return cached
-    tokens = tokenize(query, "en")
-    if not tokens:
-        return ""
-    first_token = tokens[0]
-    L = first_token['word']['L']
-    S = first_token['word']['word_S']
-    c = first_token['word']['col']
-    start_row = ((L + S - 1) % 64) + 1
-    start_col = c % 26
-    results = grid_crawl(memory, start_row, start_col, limit=10)
-    context_parts = []
-    for r in results:
-        doc_id = r['doc_id']
-        doc_text = memory.get_doc(doc_id)
-        if doc_text:
-            context_parts.append(doc_text)
-    context = "\n".join(context_parts[:3])
+    context = word_understanding.get_context(query)
     memory_cache.set(query, context)
     return context
 
@@ -284,7 +272,7 @@ async def generate_summary(ws_id: str, user: User = Depends(get_current_user)):
     finally:
         db.close()
 
-# General endpoints
+# General generation
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     context = get_context_from_memory(req.prompt)
@@ -308,6 +296,7 @@ async def generate(req: GenerateRequest):
         generated = "I apologize, I cannot provide that answer."
     return {"generated": generated}
 
+# Prediction
 @app.post("/predict")
 async def predict(req: PredictRequest):
     if model is None or tokenizer_vocab is None:
@@ -323,6 +312,7 @@ async def predict(req: PredictRequest):
             predictions.append({"word": word, "prob": topk.values[i].item()})
     return {"predictions": predictions}
 
+# Research
 @app.post("/research")
 async def research(req: ResearchRequest):
     query = req.query.strip()
@@ -346,6 +336,7 @@ async def research(req: ResearchRequest):
     search_cache.set(query, data)
     return data
 
+# Crawl web
 @app.post("/crawl")
 async def crawl_web(req: CrawlRequest):
     text = web_crawler.crawl(req.url)
@@ -354,17 +345,17 @@ async def crawl_web(req: CrawlRequest):
         f.write(text + '\n')
     return {"message": "Crawled", "doc_id": doc_id, "words": len(text.split())}
 
+# Train
 @app.post("/train")
 async def train(req: TrainRequest):
-    # Directly call background training
-    from background_training import train_model
-    await asyncio.to_thread(train_model)
+    from train import train as do_train
+    await asyncio.to_thread(do_train)
     return {"message": "Training completed"}
 
-# Startup
+# Startup background training
 @app.on_event("startup")
 async def startup_event():
     start_background_training()
 
-# Static files
+# Serve frontend
 app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
