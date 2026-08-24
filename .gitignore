@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+uploads/
+*.pth
+tokenizer_vocab.json
+companion_model.pth
