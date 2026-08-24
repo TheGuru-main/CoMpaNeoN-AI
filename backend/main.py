@@ -3,7 +3,7 @@ import json
 import asyncio
 import torch
 import torch.nn.functional as F
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,9 +11,10 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from database import engine, SessionLocal, Base
-from db_models import User, Workspace, Message
+from db_models import User, Workspace, Message, APIKey
 from ai_model import MiniCompanionAI
-from auth import get_current_user, hash_password, verify_password, create_access_token, validate_phone, compute_user_cell
+from auth import get_current_user, hash_password, verify_password, create_access_token, validate_phone, compute_user_cell, get_db
+from api_auth import verify_api_key, rate_limiter, create_api_key
 from tokenizer import tokenize, normalize_lang, grid_dims, supported_languages
 from memory_grid import MemoryGrid
 from grid_crawler import crawl as grid_crawl
@@ -30,6 +31,8 @@ from background_training import start_background_training
 from rules import enforce_rules
 from BubbleJumbo_rules import BubbleJumboRules
 from word_understanding import WordUnderstanding
+from summary import generate_summary as generate_ai_summary
+from follow_up import generate_follow_ups
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -73,7 +76,7 @@ def load_model_if_exists():
 
 load_model_if_exists()
 
-# Helpers
+# Helper functions
 def encode_text(text: str, lang: str = "en") -> List[int]:
     tokens = tokenize(text, lang)
     ids = [tokenizer_vocab.get("<start>", 2)]
@@ -118,6 +121,9 @@ class GenerateRequest(BaseModel):
     prompt: str
     max_len: int = 500
     temperature: float = 0.8
+    workspace_name: Optional[str] = ""
+    conversation_history: Optional[str] = ""
+    temperament: str = "sanguine"
 
 class ResearchRequest(BaseModel):
     query: str
@@ -133,6 +139,13 @@ class PredictRequest(BaseModel):
     text: str
     top_k: int = 5
 
+class SummaryRequest(BaseModel):
+    text: str
+
+class FollowUpRequest(BaseModel):
+    query: str
+    answer: str
+
 # Auth endpoints
 @app.post("/auth/signup")
 async def signup(req: SignupRequest):
@@ -140,8 +153,8 @@ async def signup(req: SignupRequest):
     try:
         if not validate_phone(req.phone, req.country[:2].upper()):
             raise HTTPException(400, "Invalid phone number. Must start with '+' and follow country length.")
-        user = db.query(User).filter(User.phone == req.phone).first()
-        if user:
+        existing = db.query(User).filter(User.phone == req.phone).first()
+        if existing:
             raise HTTPException(400, "Phone already registered")
         hashed = hash_password(req.password)
         start_row, start_col = compute_user_cell(req.full_name, req.phone)
@@ -229,21 +242,7 @@ async def generate_in_workspace(ws_id: str, req: GenerateRequest, user: User = D
             conversation_history=history,
             temperament=user.temperament
         )
-        if model is not None:
-            input_ids = torch.tensor([encode_text(req.prompt)], dtype=torch.long).to(device)
-            output_ids = []
-            with torch.no_grad():
-                for _ in range(req.max_len):
-                    logits = model(input_ids)[0, -1, :] / req.temperature
-                    probs = F.softmax(logits, dim=-1)
-                    next_id = torch.multinomial(probs, 1).item()
-                    output_ids.append(next_id)
-                    input_ids = torch.cat([input_ids, torch.tensor([[next_id]], device=device)], dim=1)
-                    if next_id == tokenizer_vocab.get("<end>", 3):
-                        break
-            generated = decode_ids(output_ids)
-        else:
-            generated = prompt
+        generated = generate_from_prompt(prompt, req.max_len, req.temperature)
         if not enforce_rules(generated, user.temperament):
             generated = "I apologize, I cannot provide that answer."
         msg = Message(workspace_id=ws_id, user_id=user.id, role="assistant", content=generated)
@@ -253,48 +252,39 @@ async def generate_in_workspace(ws_id: str, req: GenerateRequest, user: User = D
     finally:
         db.close()
 
-# Summary endpoint
-@app.post("/workspace/{ws_id}/summary")
-async def generate_summary(ws_id: str, user: User = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        ws = db.query(Workspace).filter(Workspace.id == ws_id, Workspace.user_id == user.id).first()
-        if not ws:
-            raise HTTPException(404, "Workspace not found")
-        msgs = db.query(Message).filter(Message.workspace_id == ws_id).all()
-        if not msgs:
-            raise HTTPException(400, "No messages to summarize")
-        combined = " ".join([m.content for m in msgs])
-        summary = combined[:500] + ("..." if len(combined) > 500 else "")
-        ws.summary = summary
-        db.commit()
-        return {"summary": summary}
-    finally:
-        db.close()
-
 # General generation
-@app.post("/generate")
-async def generate(req: GenerateRequest):
-    context = get_context_from_memory(req.prompt)
-    prompt = build_prompt(query=req.prompt, context=context, temperament="sanguine")
-    if model is not None:
-        input_ids = torch.tensor([encode_text(req.prompt)], dtype=torch.long).to(device)
+def generate_from_prompt(prompt: str, max_len: int, temperature: float) -> str:
+    if model is not None and tokenizer_vocab is not None:
+        input_ids = torch.tensor([encode_text(prompt)], dtype=torch.long).to(device)
         output_ids = []
         with torch.no_grad():
-            for _ in range(req.max_len):
-                logits = model(input_ids)[0, -1, :] / req.temperature
+            for _ in range(max_len):
+                logits = model(input_ids)[0, -1, :] / temperature
                 probs = F.softmax(logits, dim=-1)
                 next_id = torch.multinomial(probs, 1).item()
                 output_ids.append(next_id)
                 input_ids = torch.cat([input_ids, torch.tensor([[next_id]], device=device)], dim=1)
                 if next_id == tokenizer_vocab.get("<end>", 3):
                     break
-        generated = decode_ids(output_ids)
+        return decode_ids(output_ids)
     else:
-        generated = prompt
-    if not enforce_rules(generated, "sanguine"):
+        return prompt  # fallback
+
+@app.post("/generate")
+async def generate(req: GenerateRequest):
+    context = get_context_from_memory(req.prompt)
+    prompt = build_prompt(
+        query=req.prompt,
+        context=context,
+        workspace_name=req.workspace_name,
+        conversation_history=req.conversation_history,
+        temperament=req.temperament
+    )
+    generated = generate_from_prompt(prompt, req.max_len, req.temperature)
+    follow_ups = generate_follow_ups(req.prompt, generated, detect_domain(req.prompt))
+    if not enforce_rules(generated, req.temperament):
         generated = "I apologize, I cannot provide that answer."
-    return {"generated": generated}
+    return {"generated": generated, "follow_ups": follow_ups}
 
 # Prediction
 @app.post("/predict")
@@ -336,7 +326,7 @@ async def research(req: ResearchRequest):
     search_cache.set(query, data)
     return data
 
-# Crawl web
+# Crawl
 @app.post("/crawl")
 async def crawl_web(req: CrawlRequest):
     text = web_crawler.crawl(req.url)
@@ -349,13 +339,75 @@ async def crawl_web(req: CrawlRequest):
 @app.post("/train")
 async def train(req: TrainRequest):
     from train import train as do_train
-    await asyncio.to_thread(do_train)
+    await asyncio.to_thread(do_train, epochs=req.epochs, batch_size=req.batch_size)
+    load_model_if_exists()  # reload model after training
     return {"message": "Training completed"}
 
-# Startup background training
+# Summary
+@app.post("/summary")
+async def summary(req: SummaryRequest):
+    summary_text = generate_ai_summary(req.text)
+    return {"summary": summary_text}
+
+# Follow-up
+@app.post("/follow_up")
+async def follow_up(req: FollowUpRequest):
+    domain = detect_domain(req.query)
+    follow_ups = generate_follow_ups(req.query, req.answer, domain)
+    return {"follow_ups": follow_ups}
+
+# Public API endpoints (indexer, crawler, tokenizer, general AI)
+@app.post("/api/v1/public/tokenize")
+async def public_tokenize(text: str, lang: str = "en", api_key: str = Depends(verify_api_key)):
+    tokens = tokenize(text, lang)
+    return {
+        "tokens": tokens,
+        "grid_dims": grid_dims(lang),
+        "languages": supported_languages()
+    }
+
+@app.post("/api/v1/public/index")
+async def public_index(text: str, lang: str = "en", source: str = "", api_key: str = Depends(verify_api_key)):
+    doc_id = memory.add_document(text, lang, source)
+    return {"doc_id": doc_id, "message": "Document indexed"}
+
+@app.post("/api/v1/public/crawl")
+async def public_crawl(url: str, api_key: str = Depends(verify_api_key)):
+    text = web_crawler.crawl(url)
+    doc_id = memory.add_document(text, "en", url)
+    return {"doc_id": doc_id, "words": len(text.split())}
+
+@app.post("/api/v1/public/generate")
+async def public_generate(req: GenerateRequest, api_key: str = Depends(verify_api_key)):
+    context = get_context_from_memory(req.prompt)
+    prompt = build_prompt(
+        query=req.prompt,
+        context=context,
+        workspace_name=req.workspace_name,
+        conversation_history=req.conversation_history,
+        temperament=req.temperament
+    )
+    generated = generate_from_prompt(prompt, req.max_len, req.temperature)
+    follow_ups = generate_follow_ups(req.prompt, generated, detect_domain(req.prompt))
+    return {"generated": generated, "follow_ups": follow_ups}
+
+@app.post("/api/v1/public/predict")
+async def public_predict(req: PredictRequest, api_key: str = Depends(verify_api_key)):
+    # Reuse predict logic
+    return await predict(req)
+
+@app.post("/api/v1/public/research")
+async def public_research(req: ResearchRequest, api_key: str = Depends(verify_api_key)):
+    return await research(req)
+
+@app.post("/api/v1/public/train")
+async def public_train(req: TrainRequest, api_key: str = Depends(verify_api_key)):
+    return await train(req)
+
+# Startup
 @app.on_event("startup")
 async def startup_event():
     start_background_training()
 
-# Serve frontend
+# Serve frontend (assuming built frontend in ../frontend)
 app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
