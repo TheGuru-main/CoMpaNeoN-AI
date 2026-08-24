@@ -1,3 +1,5 @@
+import re
+
 DOMAIN_KEYWORDS = {
     "medical": ["diagnosis","treatment","symptom","surgery"],
     "legal": ["law","court","attorney","legal"],
