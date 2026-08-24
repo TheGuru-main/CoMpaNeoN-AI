@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://user:pass@host:5432/companion")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://user:password@host:5432/companion")
 ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
