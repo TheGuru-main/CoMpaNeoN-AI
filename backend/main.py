@@ -28,6 +28,7 @@ from code_languages import CODE_TERMS
 from search_cache import SearchCache
 from memory_cache import MemoryCache
 from background_training import start_background_training
+from train import train
 from rules import enforce_rules
 from bubbleJumbo_rules import BubbleJumboRules
 from word_understanding import WordUnderstanding
