@@ -45,14 +45,13 @@ from symbols import recognize_symbols
 from code_languages import CODE_TERMS
 from directives import detect_directive
 
-from gsp import (
+from keyboard import (
     calculate_lsum,
     calculate_ssum,
     first_letter_index,
     gsp_place,
     elastic_cloud,
 )
-
 
 # ---------------------------------------------------------------------------
 # SCORING WEIGHTS
