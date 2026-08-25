@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -109,7 +109,6 @@ def generate_from_prompt(prompt: str, max_len: int, temperature: float) -> str:
         return prompt
 
 # Pydantic models
-from pydantic import BaseModel, Field
 
 class SignupRequest(BaseModel):
     # Matches your db_models.py max capacity of 255
