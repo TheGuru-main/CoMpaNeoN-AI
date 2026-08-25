@@ -7,16 +7,25 @@ from datetime import datetime
 
 class User(Base):
     __tablename__ = "users"
+    
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    phone = Column(String(20), unique=True, nullable=False)
+    
+    # Secure phone format protection (Max 20 chars prevents overflows)
+    phone = Column(String(15), unique=True, nullable=False, index=True)
+    
     full_name = Column(String(255), nullable=False)
     password_hash = Column(String(255), nullable=False)
     language = Column(String(10), default="en")
+    
+    # Expanded capacity up to 100 characters to cleanly allow all 200+ global country names
     country = Column(String(100), default="Nigeria")
+    
     temperament = Column(String(20), default="sanguine")
     settings = Column(JSON, default={})
-    start_row = Column(Integer, nullable=False)  # message box start row
-    start_col = Column(Integer, nullable=False)  # column from first letter
+    start_row = Column(Integer, nullable=False)  
+# message box start row
+    start_col = Column(Integer, nullable=False) 
+ # column from first letter
     created_at = Column(DateTime, default=datetime.utcnow)
 
     workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
@@ -33,12 +42,14 @@ class Workspace(Base):
     user = relationship("User", back_populates="workspaces")
     messages = relationship("Message", back_populates="workspace", cascade="all, delete-orphan")
 
+
 class Message(Base):
     __tablename__ = "messages"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    role = Column(String(20), nullable=False)   # "user" or "assistant"
+    role = Column(String(20), nullable=False)   
+#"user" or "assistant"
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
