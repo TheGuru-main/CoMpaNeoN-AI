@@ -9,6 +9,10 @@ RULES = {
     "no_secret_leaking": True,
     "direct_answers": True,
     "respect_idioms_disjunctions": True,
+    "always_remember" : True,
+    "be_collaborative" : True,
+    "expose_root_code" : False,
+    "
 }
 
 # Patterns that indicate hallucination or placeholder text
@@ -20,7 +24,7 @@ HALLUCINATION_PATTERNS = [
     "i cannot provide",
     "i am unable",
     "i apologize",
-    "i'm sorry",
+    "i'm sorry, but",
     "i cannot answer",
     "i have no information",
     "i do not have",
