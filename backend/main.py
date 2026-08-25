@@ -464,11 +464,15 @@ async def public_train(req: TrainRequest, api_key: str = Depends(verify_api_key)
     return await train(req)
 
 # ==============================================================================
-# APPLICATION LIFECYCLE (Fixed)
+# APPLICATION LIFECYCLE
 # ==============================================================================
 @app.on_event("startup")
 async def startup_event():
-    Base.metadata.create_all(bind=engine) asyncio.create_task(asyncio.to_thread(start_background_training))
+    # Line 1: Build structural database tables safely on launch
+    Base.metadata.create_all(bind=engine) 
+    
+    # Line 2: Offload the machine learning loop onto a non-blocking background thread
+    asyncio.create_task(asyncio.to_thread(start_background_training))
 
 
 # ================================================
