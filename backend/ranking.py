@@ -21,7 +21,7 @@ Signals:
 - Unrelated hierarchy penalty
 
 Important:
-- Main GSP placement continues to use the FULL WORD.
+
 - Tokenizer/grid remains independent from main GSP placement.
 - Domain detection remains external to this module.
 - Dictionary/synonym understanding remains external to this module.
