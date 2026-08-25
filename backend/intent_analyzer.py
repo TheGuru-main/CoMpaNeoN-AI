@@ -1,5 +1,5 @@
 DOMAIN_KEYWORDS = {
-    "code": ["def", "class", "import", "function", "return", "if", "else", "loop", "variable", "algorithm", "debug", "compiler", "library", "api", "database", "framework", "python", "javascript", "java", "c++", "c#", "ruby", "php", "sql", "html", "css"],
+    "code": ["def", "class", "import", "function", "return", "if", "else", "loop", "variable", "algorithm", "debug", "compiler", "library", "api", "database", "framework", "python", "javascript", "java", "c++", "c#", "ruby", "php", "sql", "html", "css", "python_rules", "fix_my_code", "debug"],
     "medical": ["diagnosis","treatment","symptom","surgery","disease","patient","clinical","pharmacy","drug"],
     "legal": ["law","court","attorney","legal","statute","regulation","compliance","lawsuit","judge"],
     "education": ["homework","explain","definition","learn","teach","curriculum","classroom","student","school"],
