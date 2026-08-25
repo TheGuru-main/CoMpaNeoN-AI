@@ -60,3 +60,65 @@ def generate_follow_ups(query: str, answer: str, domain: str = "general", max_qu
     # Ensure unique and limit
     unique_questions = list(dict.fromkeys(questions))
     return unique_questions[:max_questions]
+
+def extract_word_pairs(text: str):
+    """
+    Extract adjacent word pairs from text.
+
+    Example:
+        "python is a programming language"
+
+    produces:
+        python_is
+        is_a
+        a_programming
+        programming_language
+    """
+    words = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    return [
+        f"{words[i]}_{words[i + 1]}"
+        for i in range(len(words) - 1)
+    ]
+
+
+def extract_next_word_candidates(text: str, limit=5):
+    """
+    Find likely next words from observed adjacent word sequences.
+
+    This is intentionally lightweight and deterministic.
+    It does not require embeddings or vector databases.
+    """
+    words = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    if len(words) < 2:
+        return []
+
+    transitions = defaultdict(Counter)
+
+    for i in range(len(words) - 1):
+        current_word = words[i]
+        next_word = words[i + 1]
+
+        if current_word in STOP_WORDS:
+            continue
+
+        transitions[current_word][next_word] += 1
+
+    candidates = []
+
+    for word, next_words in transitions.items():
+        for next_word, count in next_words.most_common(limit):
+            candidates.append({
+                "word": next_word,
+                "after": word,
+                "count": count,
+                "pair": f"{word}_{next_word}",
+            })
+
+    candidates.sort(
+        key=lambda x: x["count"],
+        reverse=True
+    )
+
+    return candidates[:limit]
