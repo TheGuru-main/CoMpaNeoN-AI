@@ -79,6 +79,160 @@ def get_three_by_three(cell: Dict[str, int]) -> List[Dict[str, int]]:
             })
     return cells
 
+def _clean_words(text: str) -> List[str]:
+    """
+    Convert text into normalized words while preserving
+    underscore-connected phrases.
+    """
+    return re.findall(
+        r"[a-zA-Z0-9_]+",
+        str(text).lower()
+    )
+
+
+def extract_word_pairs(text: str) -> List[str]:
+    """
+    Generate adjacent word pairs.
+
+    Example:
+        "where can I buy rice"
+
+    becomes:
+        where_can
+        can_i
+        i_buy
+        buy_rice
+    """
+    words = _clean_words(text)
+
+    return [
+        f"{words[i]}_{words[i + 1]}"
+        for i in range(len(words) - 1)
+    ]
+
+
+def word_pair_score(query: str, candidate_text: str) -> float:
+    """
+    Score how many adjacent word relationships from the query
+    are preserved by the candidate.
+    """
+
+    query_pairs = extract_word_pairs(query)
+
+    if not query_pairs:
+        return 0.0
+
+    candidate_pairs = set(
+        extract_word_pairs(candidate_text)
+    )
+
+    matched = sum(
+        1 for pair in query_pairs
+        if pair in candidate_pairs
+    )
+
+    return matched / len(query_pairs) * 100.0
+
+
+def next_word_prediction_score(
+    query: str,
+    candidate_text: str
+) -> float:
+    """
+    Measures whether the candidate naturally continues
+    the final word/phrase of the query.
+
+    Example:
+
+        Query:
+            "where can I buy"
+
+        Candidate:
+            "where can I buy rice"
+
+        The candidate strongly continues the query with:
+            buy → rice
+    """
+
+    query_words = _clean_words(query)
+    candidate_words = _clean_words(candidate_text)
+
+    if not query_words or not candidate_words:
+        return 0.0
+
+    # The candidate must contain the query sequence first.
+    q_len = len(query_words)
+
+    if len(candidate_words) < q_len:
+        return 0.0
+
+    best_score = 0.0
+
+    for i in range(
+        len(candidate_words) - q_len + 1
+    ):
+        window = candidate_words[i:i + q_len]
+
+        matches = sum(
+            1
+            for q, c in zip(query_words, window)
+            if q == c
+        )
+
+        sequence_score = matches / q_len
+
+        if sequence_score > best_score:
+            best_score = sequence_score
+
+    # If the entire query occurs exactly,
+    # reward the word immediately following it.
+    for i in range(
+        len(candidate_words) - q_len
+    ):
+        window = candidate_words[i:i + q_len]
+
+        if window == query_words:
+            return 100.0
+
+    return best_score * 100.0
+
+
+def phrase_continuity_score(
+    query: str,
+    candidate_text: str
+) -> float:
+    """
+    Measures the longest continuous sequence of query words
+    appearing in the candidate.
+
+    This is stronger than independent keyword matching.
+    """
+
+    query_words = _clean_words(query)
+    candidate_words = _clean_words(candidate_text)
+
+    if not query_words or not candidate_words:
+        return 0.0
+
+    longest = 0
+
+    for i in range(len(query_words)):
+        current = 0
+
+        for j in range(len(candidate_words)):
+            q_index = i + current
+
+            if (
+                q_index < len(query_words)
+                and query_words[q_index] == candidate_words[j]
+            ):
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 0
+
+    return longest / len(query_words) * 100.0
+
 def score_candidate(
     query: str,
     candidate_text: str,
