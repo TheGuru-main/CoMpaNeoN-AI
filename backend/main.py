@@ -27,8 +27,7 @@ from symbols import recognize_symbols
 from code_languages import CODE_TERMS
 from search_cache import SearchCache
 from memory_cache import MemoryCache
-from background_training import start_background_training
-from train import train
+from background_training import start_background_training 
 from rules import enforce_rules
 from bubblejumbo_rules import BubbleJumboRules
 from word_understanding import WordUnderstanding
