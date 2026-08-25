@@ -369,30 +369,113 @@ async def add_workspace_message(
     finally:
         db.close()
 
-@app.post("/workspace/{ws_id}/generate")
-async def generate_in_workspace(ws_id: str, req: GenerateRequest, user: User = Depends(get_current_user)):
+
+       @app.post("/workspace/{ws_id}/generate")
+async def generate_in_workspace(
+    ws_id: str,
+    req: GenerateRequest,
+    user: User = Depends(get_current_user)
+):
     db = SessionLocal()
+
     try:
-        ws = db.query(Workspace).filter(Workspace.id == ws_id, Workspace.user_id == user.id).first()
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.id == ws_id,
+                Workspace.user_id == user.id
+            )
+            .first()
+        )
+
         if not ws:
             raise HTTPException(404, "Workspace not found")
-        msgs = db.query(Message).filter(Message.workspace_id == ws_id).order_by(Message.created_at.desc()).limit(10).all()
-        history = "\n".join([f"{m.role}: {m.content}" for m in reversed(msgs)])
-        context = get_context_from_memory(req.prompt)
+
+        msgs = (
+            db.query(Message)
+            .filter(Message.workspace_id == ws_id)
+            .order_by(Message.created_at.desc())
+            .limit(20)
+            .all()
+        )
+
+        history = "\n".join(
+            f"{m.role}: {m.content}"
+            for m in reversed(msgs)
+        )
+
+        # Refresh temporal context when the room is used.
+        temporal_context = build_temporal_context()
+
+        ws.temporal_context = temporal_context
+
+        memory_context = get_context_from_memory(req.prompt)
+
+        project_context = {
+            "project_name": ws.project_name,
+            "project_domain": ws.project_domain,
+            "project_keywords": ws.project_keywords or [],
+            "project_grid_cv": ws.project_grid_cv or {},
+            "context_summary": ws.context_summary or "",
+            "temporal_context": temporal_context
+        }
+
+        room_context = json.dumps(
+            project_context,
+            ensure_ascii=False
+        )
+
+        combined_context = (
+            f"PROJECT/ROOM CONTEXT:\n"
+            f"{room_context}\n\n"
+            f"GLOBAL MEMORY CONTEXT:\n"
+            f"{memory_context}"
+        )
+
         prompt = build_prompt(
             query=req.prompt,
-            context=context,
+            context=combined_context,
             workspace_name=ws.project_name,
             conversation_history=history,
             temperament=user.temperament
         )
-        generated = generate_from_prompt(prompt, req.max_len, req.temperature)
+
+        generated = generate_from_prompt(
+            prompt,
+            req.max_len,
+            req.temperature
+        )
+
         if not enforce_rules(generated, user.temperament):
             generated = "I apologize, I cannot provide that answer."
-        msg = Message(workspace_id=ws_id, user_id=user.id, role="assistant", content=generated)
+
+        msg = Message(
+            workspace_id=ws.id,
+            user_id=user.id,
+            role="assistant",
+            content=generated,
+            detected_domain=detect_domain(req.prompt),
+            keywords=extract_keywords(req.prompt),
+            grid_cv=build_project_grid_cv(
+                extract_keywords(req.prompt)
+            ),
+            temporal_context=temporal_context
+        )
+
         db.add(msg)
         db.commit()
-        return {"generated": generated}
+
+        return {
+            "generated": generated,
+            "workspace": {
+                "id": str(ws.id),
+                "project_name": ws.project_name,
+                "domain": ws.project_domain,
+                "keywords": ws.project_keywords,
+                "temporal_context": temporal_context
+            }
+        }
+
     finally:
         db.close()
 
