@@ -1,9 +1,10 @@
 import asyncio
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import torch
+from langdetect import detect, LangDetectException  # Added for multi-lingual rooms
 
 from ai_model import MiniCompanionAI
 from data_mixer import DataMixer
@@ -18,22 +19,34 @@ tokenizer_vocab = None
 reverse_vocab = None
 
 
+def detect_lang(text: str) -> str:
+    """
+    Dynamically detect language for custom tokenization rules.
+    Safely falls back to 'en' if text is too short or contains ambiguous characters.
+    """
+    try:
+        if not text.strip():
+            return "en"
+        return detect(text)
+    except LangDetectException:
+        return "en"  # Safe default fallback for code snippets, emojis, or short strings
+
+
 def get_unique_words_count() -> int:
     """Count unique words stored in the memory grid."""
     unique = set()
     for row in memory.grid:
         for col in row:
             for token_info in col:
-                # token_info has 'stem' and 'original'
                 unique.add(token_info['stem'])
                 unique.add(token_info['original'])
     return len(unique)
 
 
-def train_model():
+def train_model(grid_cv_params: dict = None):
     """
-    Train the transformer on all texts from the data mixer.
-    Saves model and tokenizer vocab.
+    Train the transformer on all texts from the data mixer with batch versioning.
+    Saves unique model checkpoints and synchronized tokenizer vocab for zero-downtime hot swapping.
     """
     global tokenizer_vocab, reverse_vocab
     texts = mixer.texts
@@ -41,12 +54,25 @@ def train_model():
         print("No training data found.")
         return
 
+    # 1. GENERATE DEPLOYMENT VERSION STRINGS
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    batch_version = f"v_{timestamp}"
+    
+    hyperparams = grid_cv_params or {
+        "lr": 1e-4,
+        "epochs": 30,
+        "batch_size": 4
+    }
+
     # Build vocabulary from all texts
     tokenizer_vocab = {"<pad>": 0, "<unk>": 1, "<start>": 2, "<end>": 3}
     reverse_vocab = {0: "<pad>", 1: "<unk>", 2: "<start>", 3: "<end>"}
 
     for text in texts:
-        tokens = tokenize(text, "en")
+        # DYNAMIC REPLACEMENT: Detect language per individual text chunk in the shared room data
+        lang = detect_lang(text)
+        tokens = tokenize(text, lang)
+        
         for t in tokens:
             for w in [t['stem'], t['original']]:
                 if w not in tokenizer_vocab:
@@ -56,7 +82,10 @@ def train_model():
     # Encode all documents
     encoded_docs = []
     for text in texts:
-        tokens = tokenize(text, "en")
+        # DYNAMIC REPLACEMENT: Detect language consistently during document mapping
+        lang = detect_lang(text)
+        tokens = tokenize(text, lang)
+        
         ids = [tokenizer_vocab["<start>"]]
         for t in tokens:
             word = t['stem'] if t['stem'] in tokenizer_vocab else (
@@ -72,13 +101,12 @@ def train_model():
 
     # Initialize model
     model = MiniCompanionAI(len(tokenizer_vocab))
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=hyperparams["lr"])
     criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 
-    # Training loop (simplified, can adjust epochs)
-    epochs = 30
-    batch_size = 4
-    print(f"Starting training on {len(encoded_docs)} docs, vocab size {len(tokenizer_vocab)}...")
+    epochs = hyperparams["epochs"]
+    batch_size = hyperparams["batch_size"]
+    print(f"Starting training Run [{batch_version}] | Vocab Size: {len(tokenizer_vocab)} | H-Params: {hyperparams}")
 
     for epoch in range(epochs):
         total_loss = 0
@@ -87,7 +115,6 @@ def train_model():
             if not batch:
                 continue
 
-            # Pad batch to max length
             max_len = max(len(seq) for seq in batch)
             x = torch.zeros((len(batch), max_len - 1), dtype=torch.long)
             y = torch.zeros((len(batch), max_len - 1), dtype=torch.long)
@@ -104,14 +131,34 @@ def train_model():
             total_loss += loss.item()
 
         avg_loss = total_loss / max(len(encoded_docs), 1)
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+        if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == epochs - 1:
+            print(f"Batch {batch_version} | Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f}")
 
-    # Save model and vocab
+    # 2. SAVE VERSIONED WEIGHTS & SYNCED METADATA
+    model_filename = f'companion_model_{batch_version}.pth'
+    vocab_filename = f'tokenizer_vocab_{batch_version}.json'
+    
+    torch.save(model.state_dict(), model_filename)
+    
+    metadata = {
+        "batch_version": batch_version,
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "unique_words_trained": len(encoded_docs),
+        "final_loss": avg_loss,
+        "hyperparameters": hyperparams,
+        "vocab": tokenizer_vocab, 
+        "reverse": reverse_vocab
+    }
+    
+    with open(vocab_filename, 'w') as f:
+        json.dump(metadata, f, indent=4)
+
+    # Overwrite active production assets
     torch.save(model.state_dict(), 'companion_model.pth')
     with open('tokenizer_vocab.json', 'w') as f:
-        json.dump({"vocab": tokenizer_vocab, "reverse": reverse_vocab}, f)
+        json.dump(metadata, f, indent=4)
 
-    print("Training complete. Model saved.")
+    print(f"Deployment artifacts saved. Active production updated to: {batch_version}")
 
 
 async def auto_train_monitor():
@@ -120,14 +167,14 @@ async def auto_train_monitor():
     print(f"Auto-train monitor started. Unique words: {last_count}")
 
     while True:
-        await asyncio.sleep(60)  # check every minute
+        await asyncio.sleep(60)
         current_count = get_unique_words_count()
         if current_count > last_count:
             print(f"New words detected ({current_count} vs {last_count}). Starting training...")
             await asyncio.to_thread(train_model)
             last_count = current_count
         else:
-            last_count = current_count  # in case of deletion, keep sync
+            last_count = current_count
 
 
 def start_background_training():
