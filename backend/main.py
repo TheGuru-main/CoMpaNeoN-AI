@@ -301,14 +301,71 @@ async def create_workspace(
         db.close()
 
 
+
 @app.post("/workspace/{ws_id}/message")
-async def add_workspace_message(ws_id: str, req: MessageRequest, user: User = Depends(get_current_user)):
+async def add_workspace_message(
+    ws_id: str,
+    req: MessageRequest,
+    user: User = Depends(get_current_user)
+):
     db = SessionLocal()
+
     try:
-        msg = Message(workspace_id=ws_id, user_id=user.id, role="user", content=req.content)
+        ws = (
+            db.query(Workspace)
+            .filter(
+                Workspace.id == ws_id,
+                Workspace.user_id == user.id
+            )
+            .first()
+        )
+
+        if not ws:
+            raise HTTPException(404, "Workspace not found")
+
+        message_keywords = extract_keywords(req.content)
+
+        all_keywords = merge_keywords(
+            ws.project_keywords,
+            message_keywords
+        )
+
+        project_grid_cv = build_project_grid_cv(all_keywords)
+
+        temporal_context = build_temporal_context()
+
+        message_domain = detect_domain(req.content)
+
+        msg = Message(
+            workspace_id=ws.id,
+            user_id=user.id,
+            role="user",
+            content=req.content,
+            detected_domain=message_domain,
+            keywords=message_keywords,
+            grid_cv=build_project_grid_cv(message_keywords),
+            temporal_context=temporal_context
+        )
+
         db.add(msg)
+
+        ws.project_keywords = all_keywords
+        ws.project_grid_cv = project_grid_cv
+        ws.project_domain = message_domain
+        ws.temporal_context = temporal_context
+        ws.updated_at = datetime.utcnow()
+
         db.commit()
-        return {"ok": True}
+
+        return {
+            "ok": True,
+            "workspace_id": str(ws.id),
+            "keywords": all_keywords,
+            "grid_cv": project_grid_cv,
+            "domain": message_domain,
+            "temporal_context": temporal_context
+        }
+
     finally:
         db.close()
 
