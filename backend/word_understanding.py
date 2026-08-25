@@ -11,112 +11,336 @@ Combines:
 """
 
 import hashlib
-from typing import List, Dict, Any, Optional
-from tokenizer import tokenize, normalize_lang, letter_score, word_score, supported_languages
+
+from typing import (
+    List,
+    Dict,
+    Any,
+    Optional,
+)
+
+from tokenizer import (
+    tokenize,
+    normalize_lang,
+    letter_score,
+    word_score,
+    supported_languages,
+)
+
 from memory_grid import MemoryGrid
 from grid_crawler import crawl as grid_crawl
+
 from symbols import recognize_symbols
 from code_languages import CODE_TERMS
 from directives import detect_directive
+
 from page_cache import PageCache
 from memory_cache import MemoryCache
+
 from ranking import score_candidate
 from intent_analyzer import detect_domain
 
 
 class WordUnderstanding:
+
     def __init__(self, memory_grid: MemoryGrid):
         self.memory = memory_grid
         self.page_cache = PageCache()
         self.memory_cache = MemoryCache()
 
     def _hash(self, text: str) -> str:
-        return hashlib.sha256(text.encode()).hexdigest()
+        return hashlib.sha256(
+            text.encode()
+        ).hexdigest()
 
-    def get_context(self, query: str, lang: str = "en", limit: int = 10) -> str:
-        """Retrieve and rank context from memory grid for a query."""
-        cached = self.memory_cache.get(query)
+    def get_context(
+        self,
+        query: str,
+        lang: str = "en",
+        limit: int = 10,
+    ) -> str:
+        """
+        Retrieve and rank context from memory grid.
+
+        Every query word enters the crawler through its own
+        tokenizer word-grid position.
+
+        Main GSP placement remains separate from tokenization.
+        """
+
+        cached = self.memory_cache.get(
+            query
+        )
+
         if cached:
             return cached
 
-        tokens = tokenize(query, lang)
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
         if not tokens:
             return ""
 
-        directive = detect_directive(query)
-        crawl_limit = limit + 2 if directive in {"entity_identity", "location"} else limit
+        directive = detect_directive(
+            query
+        )
 
-        first = tokens[0]
-        L = first["word"]["L"]
-        S = first["word"]["word_S"]
-        c = first["word"]["col"]
-        start_row = ((L + S - 1) % 64) + 1
-        start_col = c % 26
+        crawl_limit = (
+            limit + 2
+            if directive in {
+                "entity_identity",
+                "location",
+            }
+            else limit
+        )
 
-        results = grid_crawl(self.memory, start_row, start_col, limit=crawl_limit)
+        # ---------------------------------------------------------------
+        # ENTER GRID THROUGH EVERY QUERY TOKEN
+        # ---------------------------------------------------------------
 
-        # Collect candidate documents with their text
+        results = []
+
+        seen_results = set()
+
+        for token in tokens:
+
+            word = token["word"]
+
+            L = word["L"]
+            S = word["word_S"]
+            c = word["col"]
+
+            start_row = (
+                (L + S - 1) % 64
+            ) + 1
+
+            start_col = (
+                c % 26
+            )
+
+            token_results = grid_crawl(
+                self.memory,
+                start_row,
+                start_col,
+                limit=crawl_limit,
+            )
+
+            for result in token_results:
+
+                key = (
+                    result.get("doc_id"),
+                    result.get("original"),
+                )
+
+                if key in seen_results:
+                    continue
+
+                seen_results.add(key)
+
+                results.append(result)
+
+        # ---------------------------------------------------------------
+        # COLLECT CANDIDATE DOCUMENTS
+        # ---------------------------------------------------------------
+
         candidate_docs = []
+
         seen_doc_ids = set()
-        for r in results:
-            doc_id = r.get("doc_id")
+
+        for result in results:
+
+            doc_id = result.get(
+                "doc_id"
+            )
+
             if doc_id in seen_doc_ids:
                 continue
-            seen_doc_ids.add(doc_id)
-            doc_text = self.memory.get_doc(doc_id)
-            if doc_text:
-                candidate_docs.append({"doc_id": doc_id, "text": doc_text})
 
-        # Rank candidates using the scoring rubric
-        domain = detect_domain(query)
-        ranked = []
-        for doc in candidate_docs:
-            score_result = score_candidate(
+            seen_doc_ids.add(
+                doc_id
+            )
+
+            doc_text = self.memory.get_doc(
+                doc_id
+            )
+
+            if doc_text:
+                candidate_docs.append({
+                    "doc_id": doc_id,
+                    "text": doc_text,
+                })
+
+        if not candidate_docs:
+            self.memory_cache.set(
                 query,
-                doc["text"],
+                "",
+            )
+
+            return ""
+
+        # ---------------------------------------------------------------
+        # DOMAIN
+        # ---------------------------------------------------------------
+
+        domain = detect_domain(
+            query
+        )
+
+        # ---------------------------------------------------------------
+        # RANK
+        # ---------------------------------------------------------------
+
+        ranked = []
+
+        for doc in candidate_docs:
+
+            score_result = score_candidate(
+                query=query,
+                candidate_text=doc["text"],
                 query_entities=[],
                 query_hierarchy=domain,
                 candidate_entities=[],
                 candidate_hierarchy=domain,
                 freshness_score=0.0,
+                lang=lang,
             )
-            ranked.append((score_result["total"], doc["text"]))
 
-        ranked.sort(key=lambda x: x[0], reverse=True)
-        context = "\n".join([text for _, text in ranked[:3]])
+            ranked.append({
+                "doc_id": doc["doc_id"],
+                "text": doc["text"],
+                "score": score_result["total"],
+                "scores": score_result["scores"],
+            })
 
-        self.memory_cache.set(query, context)
+        ranked.sort(
+            key=lambda item: item["score"],
+            reverse=True,
+        )
+
+        # ---------------------------------------------------------------
+        # TOP CONTEXT
+        # ---------------------------------------------------------------
+
+        context = "\n".join(
+            item["text"]
+            for item in ranked[:3]
+        )
+
+        self.memory_cache.set(
+            query,
+            context,
+        )
+
         return context
 
-    def score_candidate(self, query: str, doc_text: str, lang: str = "en") -> float:
-        """Return combined lexical score for a candidate document."""
-        q_tokens = tokenize(query, lang)
+    def score_candidate(
+        self,
+        query: str,
+        doc_text: str,
+        lang: str = "en",
+    ) -> float:
+        """
+        Return combined lexical score for a candidate document.
+        """
+
+        q_tokens = tokenize(
+            query,
+            lang,
+        )
+
         if not q_tokens:
             return 0.0
-        l_score = letter_score(q_tokens, doc_text, lang)
-        w_score = word_score(q_tokens, doc_text, lang)
-        return (l_score * 0.4) + (w_score * 0.6)
 
-    def rank_documents(self, query: str, doc_ids: List[int], lang: str = "en") -> List[Dict[str, Any]]:
+        l_score = letter_score(
+            q_tokens,
+            doc_text,
+            lang,
+        )
+
+        w_score = word_score(
+            q_tokens,
+            doc_text,
+            lang,
+        )
+
+        return (
+            l_score * 0.4
+            + w_score * 0.6
+        )
+
+    def rank_documents(
+        self,
+        query: str,
+        doc_ids: List[int],
+        lang: str = "en",
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank explicitly supplied documents.
+        """
+
         scored = []
+
         for doc_id in doc_ids:
-            text = self.memory.get_doc(doc_id)
+
+            text = self.memory.get_doc(
+                doc_id
+            )
+
             if not text:
                 continue
-            score = self.score_candidate(query, text, lang)
-            scored.append({"doc_id": doc_id, "score": score, "text": text})
-        scored.sort(key=lambda x: x["score"], reverse=True)
+
+            score = self.score_candidate(
+                query,
+                text,
+                lang,
+            )
+
+            scored.append({
+                "doc_id": doc_id,
+                "score": score,
+                "text": text,
+            })
+
+        scored.sort(
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+
         return scored
 
-    def understand(self, query: str, lang: str = "en") -> dict:
-        context = self.get_context(query, lang)
-        tokens = tokenize(query, lang)
-        symbols = recognize_symbols(query, "general")
-        directive = detect_directive(query)
+    def understand(
+        self,
+        query: str,
+        lang: str = "en",
+    ) -> dict:
+
+        context = self.get_context(
+            query,
+            lang,
+        )
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        symbols = recognize_symbols(
+            query,
+            "general",
+        )
+
+        directive = detect_directive(
+            query,
+        )
+
         return {
             "context": context,
             "tokens": tokens,
             "symbols": symbols,
             "directive": directive,
-            "language": normalize_lang(lang),
+            "language": normalize_lang(
+                lang
+            ),
         }
