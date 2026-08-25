@@ -252,6 +252,37 @@ def score_candidate(
     q_tokens = tokenize(query)
     c_tokens = tokenize(candidate_text)
 
+    # ---------------------------------------------------------
+    # WORD / PHRASE CONTINUITY
+    # ---------------------------------------------------------
+
+    pair_score = word_pair_score(
+        query,
+        candidate_text
+    )
+
+    scores["word_pair"] = (
+        pair_score / 100.0
+    ) * WEIGHTS["word_pair"]
+
+    next_word_score = next_word_prediction_score(
+        query,
+        candidate_text
+    )
+
+    scores["next_word_prediction"] = (
+        next_word_score / 100.0
+    ) * WEIGHTS["next_word_prediction"]
+
+    phrase_score = phrase_continuity_score(
+        query,
+        candidate_text
+    )
+
+    scores["phrase_continuity"] = (
+        phrase_score / 100.0
+    ) * WEIGHTS["phrase_continuity"]
+
     # Exact lexical match: use word_score from tokenizer (exact/stem)
     exact_lex = word_score(q_tokens, candidate_text)
     scores["exact_lexical"] = min(exact_lex, 100) * WEIGHTS["exact_lexical"] / 100
