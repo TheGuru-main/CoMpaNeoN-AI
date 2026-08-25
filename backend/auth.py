@@ -1,7 +1,8 @@
 import os
 import re
-from datetime import datetime, timedelta
-import JWTError, jwt
+from datetime import datetime, timedelta, timezone
+import bcrypt
+import jwt  # PyJWT
 from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from database import SessionLocal
@@ -9,7 +10,6 @@ from db_models import User
 
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
 ALGORITHM = "HS256"
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_db():
     db = SessionLocal()
@@ -26,9 +26,9 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-
 def create_access_token(user_id: str):
-    expire = datetime.utcnow() + timedelta(days=7)
+    # PyJWT prefers aware datetimes (UTC) to avoid deprecation warnings
+    expire = datetime.now(timezone.utc) + timedelta(days=7)
     payload = {"sub": str(user_id), "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -70,12 +70,14 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         raise HTTPException(401, "Not authenticated")
     token = authorization.split(" ")[1]
     try:
+        # PyJWT requires algorithms list parameter passed as 'algorithms'
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
         if user_id is None:
-            raise HTTPException(401)
-    except JWTError:
+            raise HTTPException(401, "Invalid token claims")
+    except jwt.PyJWTError:  # Replaced JWTError with PyJWTError
         raise HTTPException(401, "Invalid token")
+        
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(401, "User not found")
