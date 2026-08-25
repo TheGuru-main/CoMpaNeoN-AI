@@ -28,8 +28,9 @@ Important:
 - No embeddings/vector search are introduced here.
 """
 
-from typing import List, Dict, Any, Optional
 import re
+
+from typing import List, Dict, Any, Optional
 
 from tokenizer import (
     tokenize,
@@ -38,13 +39,6 @@ from tokenizer import (
     word_score,
 )
 
-from grid_crawler import crawl as grid_crawl
-from memory_grid import MemoryGrid
-
-from symbols import recognize_symbols
-from code_languages import CODE_TERMS
-from directives import detect_directive
-
 from keyboard import (
     calculate_lsum,
     calculate_ssum,
@@ -52,6 +46,13 @@ from keyboard import (
     gsp_place,
     elastic_cloud,
 )
+
+from grid_crawler import crawl as grid_crawl
+from memory_grid import MemoryGrid
+
+from symbols import recognize_symbols
+from code_languages import CODE_TERMS
+from directives import detect_directive
 
 # ---------------------------------------------------------------------------
 # SCORING WEIGHTS
