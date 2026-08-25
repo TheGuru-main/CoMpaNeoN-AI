@@ -29,7 +29,7 @@ from search_cache import SearchCache
 from memory_cache import MemoryCache
 from background_training import start_background_training
 from rules import enforce_rules
-from BubbleJumbo_rules import BubbleJumboRules
+from bubbleJumbo_rules import BubbleJumboRules
 from word_understanding import WordUnderstanding
 from summary import generate_summary as generate_ai_summary
 from follow_up import generate_follow_ups
