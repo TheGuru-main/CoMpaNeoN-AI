@@ -384,8 +384,9 @@ def compute_gsp_cell(
     This intentionally does not replace the tokenizer's grid.
     """
 
-    # Preserve the existing architecture.
-    clean = normalize_lang(text)
+ # Preserve the existing architecture.
+    clean = text.strip().lower()
+    lang = normalize_lang(lang)
 
     L = calculate_lsum(
         clean,
