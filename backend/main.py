@@ -151,7 +151,7 @@ class CrawlRequest(BaseModel):
     url: str
 
 class TrainRequest(BaseModel):
-    epochs: int = 10
+    epochs: int = 30
     batch_size: int = 8
 
 class PredictRequest(BaseModel):
