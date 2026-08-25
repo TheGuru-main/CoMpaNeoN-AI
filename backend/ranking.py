@@ -17,7 +17,8 @@ Scores candidate contexts based on:
 
 Weights are configured so strong matches dominate.
 """
-
+from collections import Counter, defaultdict
+import re
 from typing import List, Dict, Any, Optional
 from tokenizer import tokenize, normalize_lang, letter_score, word_score
 from grid_crawler import crawl as grid_crawl
@@ -41,6 +42,10 @@ WEIGHTS = {
     "distant_relationship": 10,
     "cloud_encounter": 10,
     "unrelated_hierarchy": -20,
+    "word_pair": 20,
+    "next_word_prediction": 25,
+    "phrase_continuity": 20,
+
 }
 
 def compute_gsp_cell(text: str, lang: str = "en"):
