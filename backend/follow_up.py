@@ -91,34 +91,100 @@ def extract_next_word_candidates(text: str, limit=5):
 
     return candidates[:limit]
 
-def generate_follow_ups(query: str, answer: str, domain: str = "general", max_questions=3):
-    """Generate follow-up questions using keywords and domain templates."""
-    keywords = extract_keywords(query)
+def generate_follow_ups(
+    query: str,
+    answer: str,
+    domain: str = "general",
+    max_questions=3
+):
+    """
+    Generate contextual follow-up questions.
+
+    Uses:
+    - query keywords
+    - answer keywords
+    - word-pair continuity
+    - domain
+    - previous conversational subject
+    """
+
+    query_keywords = extract_keywords(query)
+    answer_keywords = extract_keywords(answer)
+
+    keywords = query_keywords or answer_keywords
+
     if not keywords:
-        keywords = extract_keywords(answer)
+        return []
 
     questions = []
-    if domain == "code":
-        if keywords:
-            questions.append(f"Can you show me an example of using {keywords[0]}?")
-            questions.append(f"What are common errors with {keywords[0]}?")
-            questions.append(f"How does {keywords[0]} relate to {keywords[1] if len(keywords)>1 else 'other concepts'}?")
-    elif domain == "medical":
-        if keywords:
-            questions.append(f"What are the symptoms of {keywords[0]}?")
-            questions.append(f"What treatments are available for {keywords[0]}?")
-            questions.append(f"Are there any side effects of {keywords[0]}?")
-    elif domain == "business":
-        if keywords:
-            questions.append(f"How does {keywords[0]} impact small businesses?")
-            questions.append(f"What are the market trends for {keywords[0]}?")
-            questions.append(f"Can you explain {keywords[0]} with an example?")
-    else:
-        if keywords:
-            questions.append(f"Can you tell me more about {keywords[0]}?")
-            questions.append(f"How does {keywords[0]} work?")
-            questions.append(f"What are the key aspects of {keywords[0]}?")
 
-    # Ensure unique and limit
-    unique_questions = list(dict.fromkeys(questions))
+    primary = keywords[0]
+    secondary = keywords[1] if len(keywords) > 1 else None
+
+    # ---------------------------------------------------------
+    # CONTEXTUAL QUESTIONS
+    # ---------------------------------------------------------
+
+    if domain == "code":
+        questions.extend([
+            f"Can you show me an example of using {primary}?",
+            f"What are the common errors when using {primary}?",
+        ])
+
+        if secondary:
+            questions.append(
+                f"How does {primary} relate to {secondary}?"
+            )
+
+    elif domain == "medical":
+        questions.extend([
+            f"What are the symptoms associated with {primary}?",
+            f"What treatments are commonly used for {primary}?",
+            f"What should someone know before considering treatment for {primary}?",
+        ])
+
+    elif domain == "business":
+        questions.extend([
+            f"How does {primary} affect a business?",
+            f"What are the main considerations when dealing with {primary}?",
+            f"Can you give me a practical example involving {primary}?",
+        ])
+
+    else:
+        questions.extend([
+            f"Can you explain {primary} in more detail?",
+            f"How does {primary} work?",
+            f"What is the relationship between {primary} and {secondary}?"
+            if secondary
+            else f"What are the key aspects of {primary}?",
+        ])
+
+    # ---------------------------------------------------------
+    # WORD-PAIR CONTINUITY
+    # ---------------------------------------------------------
+
+    pairs = extract_word_pairs(query)
+
+    if pairs:
+        last_pair = pairs[-1]
+
+        if "_" in last_pair:
+            first, second = last_pair.split("_", 1)
+
+            questions.append(
+                f"How does {first} relate to {second}?"
+            )
+
+    # ---------------------------------------------------------
+    # REMOVE DUPLICATES
+    # ---------------------------------------------------------
+
+    unique_questions = []
+
+    for question in questions:
+        question = question.strip()
+
+        if question and question not in unique_questions:
+            unique_questions.append(question)
+
     return unique_questions[:max_questions]
