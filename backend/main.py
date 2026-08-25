@@ -240,36 +240,63 @@ async def login(req: LoginRequest):
 # ==============================================================================
 
 @app.post("/workspace")
-async def create_workspace(req: WorkspaceCreate, user: User = Depends(get_current_user)):
+async def create_workspace(
+    req: WorkspaceCreate,
+    user: User = Depends(get_current_user)
+):
     db = SessionLocal()
+
     try:
-        project_name = req.first_message.split()[0].capitalize()
-        ws = Workspace(user_id=user.id, project_name=project_name)
+        project_name = (
+            req.project_name.strip()
+            if req.project_name
+            else req.first_message.strip()[:80]
+        )
+
+        initial_keywords = extract_keywords(req.first_message)
+
+        project_grid_cv = build_project_grid_cv(initial_keywords)
+
+        temporal_context = build_temporal_context()
+
+        ws = Workspace(
+            user_id=user.id,
+            project_name=project_name,
+            project_domain=detect_domain(req.first_message),
+            project_keywords=initial_keywords,
+            project_grid_cv=project_grid_cv,
+            context_summary=req.first_message,
+            temporal_context=temporal_context,
+            context_version=1
+        )
+
         db.add(ws)
         db.commit()
         db.refresh(ws)
-        msg = Message(workspace_id=ws.id, user_id=user.id, role="user", content=req.first_message)
+
+        msg = Message(
+            workspace_id=ws.id,
+            user_id=user.id,
+            role="user",
+            content=req.first_message,
+            detected_domain=detect_domain(req.first_message),
+            keywords=initial_keywords,
+            grid_cv=project_grid_cv,
+            temporal_context=temporal_context
+        )
+
         db.add(msg)
         db.commit()
-        return {"workspace_id": str(ws.id), "project_name": project_name}
-    finally:
-        db.close()
 
-@app.get("/workspaces")
-async def list_workspaces(user: User = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        workspaces = db.query(Workspace).filter(Workspace.user_id == user.id).all()
-        return [{"id": str(w.id), "project_name": w.project_name, "summary": w.summary} for w in workspaces]
-    finally:
-        db.close()
+        return {
+            "workspace_id": str(ws.id),
+            "project_name": ws.project_name,
+            "project_domain": ws.project_domain,
+            "keywords": initial_keywords,
+            "grid_cv": project_grid_cv,
+            "temporal_context": temporal_context
+        }
 
-@app.post("/workspace/")
-async def create_or_fetch_workspace_alternative(user: User = Depends(get_current_user)):
-    db = SessionLocal()
-    try:
-        workspaces = db.query(Workspace).filter(Workspace.user_id == user.id).all()
-        return [{"id": str(w.id), "project_name": w.project_name, "summary": w.summary} for w in workspaces]
     finally:
         db.close()
 
