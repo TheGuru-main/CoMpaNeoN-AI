@@ -76,7 +76,7 @@ def train_model():
     criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 
     # Training loop (simplified, can adjust epochs)
-    epochs = 5
+    epochs = 30
     batch_size = 4
     print(f"Starting training on {len(encoded_docs)} docs, vocab size {len(tokenizer_vocab)}...")
 
