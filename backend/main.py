@@ -109,21 +109,21 @@ def generate_from_prompt(prompt: str, max_len: int, temperature: float) -> str:
         return prompt
 
 # Pydantic models
+from pydantic import BaseModel, Field
+
 class SignupRequest(BaseModel):
-    full_name: str
-    phone: str
-    password: str
-    language: str = "en"
-    country: str = "Nigeria"
-    temperament: str = "sanguine"
-
-class LoginRequest(BaseModel):
-    phone: str
-    password: str
-
-class WorkspaceCreate(BaseModel):
-    first_message: str
-    temperament: Optional[str] = "sanguine"
+    # Matches your db_models.py max capacity of 255
+    full_name: str = Field(..., min_length=2, max_length=255)
+    
+    # Enforces standard international telephone number constraints (7 to 20 characters)
+    phone: str = Field(..., min_length=7, max_length=15)
+    
+    password: str = Field(..., min_length=6, max_length=100)
+    language: str = Field("en", max_length=10)
+    
+    # Adjusted to max_length=100 to safely match the database field layout
+    country: str = Field("Nigeria", max_length=100)
+    temperament: str = Field("sanguine", max_length=20)
 
 class MessageRequest(BaseModel):
     content: str
