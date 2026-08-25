@@ -35,10 +35,8 @@ from summary import generate_summary as generate_ai_summary
 from follow_up import generate_follow_ups
 from message import send_message, get_conversations, get_messages_between, DirectMessage
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="CoMpaNeoN AI", version="1.0.0")
+
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -163,24 +161,47 @@ class DirectMessageRequest(BaseModel):
     recipient_phone: str
     content: str
 
-# Auth endpoints
+
+# ==============================================================================
+# AUTH ENDPOINTS
+# ==============================================================================
+
 @app.post("/auth/signup")
 async def signup(req: SignupRequest):
     db = SessionLocal()
     try:
-        if not validate_phone(req.phone, req.country[:2].upper()):
+        # Maps full country name selections from your HTML form into 2-letter ISO codes for validation
+        country_mapping = {
+            "Nigeria": "NG", "Ghana": "GH", "Kenya": "KE", "South Africa": "ZA",
+            "Egypt": "EG", "Ethiopia": "ET", "Morocco": "MA", "Cameroon": "CM",
+            "Ivory Coast": "CI", "Uganda": "UG", "United States": "US", 
+            "United Kingdom": "GB", "India": "IN", "Canada": "CA", "Australia": "AU",
+            "Germany": "DE", "France": "FR", "China": "CN", "Brazil": "BR", 
+            "United Arab Emirates": "AE"
+        }
+        
+        # Check if it's already a 2-letter fallback code, otherwise map it
+        if len(req.country) == 2:
+            country_code = req.country.upper()
+        else:
+            country_code = country_mapping.get(req.country, "NG")
+
+        if not validate_phone(req.phone, country_code):
             raise HTTPException(400, "Invalid phone number.")
+            
         existing = db.query(User).filter(User.phone == req.phone).first()
         if existing:
             raise HTTPException(400, "Phone already registered")
+            
         hashed = hash_password(req.password)
         start_row, start_col = compute_user_cell(req.full_name, req.phone)
+        
         new_user = User(
             full_name=req.full_name,
             phone=req.phone,
             password_hash=hashed,
             language=req.language,
-            country=req.country,
+            country=req.country,  # Stores cleanly up to 200 characters
             temperament=req.temperament,
             start_row=start_row,
             start_col=start_col
@@ -204,6 +225,7 @@ async def login(req: LoginRequest):
         return {"access_token": token, "user": {"id": str(user.id), "full_name": user.full_name, "start_row": user.start_row}}
     finally:
         db.close()
+
 
 # ==============================================================================
 # WORKSPACE ENDPOINTS (Complete & Corrected)
