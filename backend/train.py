@@ -1,16 +1,28 @@
 import os
 import json
 import random
+from datetime import datetime, timezone
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from langdetect import detect, LangDetectException
 
 from ai_model import MiniCompanionAI
 from tokenizer import tokenize, normalize_lang
 
-# -------------------------------
+
+def detect_lang(text: str) -> str:
+    """Dynamically detect language for custom tokenization rules."""
+    try:
+        if not text.strip():
+            return "en"
+        return detect(text)
+    except LangDetectException:
+        return "en"
+
+
 # 1. Load text data from all .txt files in data_dir
-# -------------------------------
+
 def load_texts(data_dir="data"):
     texts = []
     if not os.path.isdir(data_dir):
@@ -24,14 +36,13 @@ def load_texts(data_dir="data"):
     return texts
 
 
-# -------------------------------
-# 2. Build vocabulary from tokenizer stems & originals
-# -------------------------------
-def build_vocab(texts, lang="en"):
+# 2. ALIGNED: Build vocabulary using dynamic multi-lang support
+def build_vocab(texts):
     vocab = {"<pad>": 0, "<unk>": 1, "<start>": 2, "<end>": 3}
     reverse = {0: "<pad>", 1: "<unk>", 2: "<start>", 3: "<end>"}
 
     for text in texts:
+        lang = detect_lang(text)  # Fixed hardcoded 'en'
         tokens = tokenize(text, lang)
         for tok in tokens:
             stem = tok["stem"]
@@ -45,12 +56,11 @@ def build_vocab(texts, lang="en"):
     return vocab, reverse
 
 
-# -------------------------------
-# 3. Encode all texts into token ID lists
-# -------------------------------
-def encode_texts(texts, vocab, lang="en"):
+# 3. ALIGNED: Encode text arrays safely using matching multi-lang tokens
+def encode_texts(texts, vocab):
     encoded = []
     for text in texts:
+        lang = detect_lang(text)  # Fixed hardcoded 'en'
         tokens = tokenize(text, lang)
         ids = [vocab["<start>"]]
         for tok in tokens:
@@ -63,9 +73,7 @@ def encode_texts(texts, vocab, lang="en"):
     return encoded
 
 
-# -------------------------------
 # 4. Batch generator
-# -------------------------------
 def get_batch(encoded_docs, batch_size, seq_len, vocab):
     while True:
         inputs, targets = [], []
@@ -80,9 +88,7 @@ def get_batch(encoded_docs, batch_size, seq_len, vocab):
         yield torch.tensor(inputs, dtype=torch.long), torch.tensor(targets, dtype=torch.long)
 
 
-# -------------------------------
 # 5. Main training function
-# -------------------------------
 def train(
     data_dir="data",
     epochs=100,
@@ -113,11 +119,15 @@ def train(
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss(ignore_index=vocab["<pad>"])
 
-    print("Starting training...")
+    # Establish explicit deployment version strings matching background workers
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    batch_version = f"manual_{timestamp}"
+
+    print(f"Starting manual training Run [{batch_version}]...")
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        steps = max(1, min(50, len(encoded_docs) // batch_size))  # adaptive steps
+        steps = max(1, min(50, len(encoded_docs) // batch_size))
         batch_iterator = get_batch(encoded_docs, batch_size, seq_len, vocab)
         for step in range(steps):
             x, y = next(batch_iterator)
@@ -129,12 +139,36 @@ def train(
             optimizer.step()
             total_loss += loss.item()
         avg_loss = total_loss / steps
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+        if (epoch + 1) % 10 == 0 or epoch == 0 or epoch == epochs - 1:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
 
+    # ALIGNED METADATA STORAGE SCHEMA
+    metadata = {
+        "batch_version": batch_version,
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "total_documents_mixed": len(encoded_docs),
+        "final_loss": avg_loss,
+        "hyperparameters": {
+            "lr": lr,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "seq_len": seq_len
+        },
+        "vocab": vocab, 
+        "reverse": reverse
+    }
+
+    # Save historical checkpoint files
+    torch.save(model.state_dict(), f"companion_model_{batch_version}.pth")
+    with open(f"tokenizer_vocab_{batch_version}.json", "w") as f:
+        json.dump(metadata, f, indent=4)
+
+    # Overwrite the production files
     torch.save(model.state_dict(), save_model)
     with open(save_vocab, "w") as f:
-        json.dump({"vocab": vocab, "reverse": reverse}, f)
-    print(f"Model saved to {save_model}, vocab saved to {save_vocab}")
+        json.dump(metadata, f, indent=4)
+        
+    print(f"Model and aligned vocab metadata saved under deployment pointer: {batch_version}")
 
 
 if __name__ == "__main__":
