@@ -463,12 +463,13 @@ async def public_research(req: ResearchRequest, api_key: str = Depends(verify_ap
 async def public_train(req: TrainRequest, api_key: str = Depends(verify_api_key)):
     return await train(req)
 
-# startapp
-
+# ==============================================================================
+# APPLICATION LIFECYCLE (Fixed)
+# ==============================================================================
 @app.on_event("startup")
 async def startup_event():
-    Base.metadata.create_all(bind=engine) # Safe execution space
-    start_background_training()
+    Base.metadata.create_all(bind=engine) asyncio.create_task(asyncio.to_thread(start_background_training))
+
 
 # ================================================
 # SERVE FRONTEND (
