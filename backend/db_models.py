@@ -44,6 +44,7 @@ class Message(Base):
 
     workspace = relationship("Workspace", back_populates="messages")
 
+
 class APIKey(Base):
     __tablename__ = "api_keys"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
