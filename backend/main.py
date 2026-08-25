@@ -125,9 +125,6 @@ class SignupRequest(BaseModel):
     country: str = Field("Nigeria", max_length=100)
     temperament: str = Field("sanguine", max_length=20)
 
-class MessageRequest(BaseModel):
-    content: str
-
 class LoginRequest(BaseModel):
     phone: str = Field(..., min_length=7, max_length=15)
     password: str = Field(..., min_length=6, max_length=100)
@@ -136,6 +133,9 @@ class LoginRequest(BaseModel):
 class WorkspaceCreate(BaseModel):
     first_message: str = Field(..., min_length=1)
     project_name: Optional[str] = Field(default=None, max_length=255)
+
+class MessageRequest(BaseModel):
+    content: str
 
 class GenerateRequest(BaseModel):
     prompt: str
