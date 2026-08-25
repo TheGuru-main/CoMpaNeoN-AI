@@ -64,7 +64,7 @@ def enforce_rules(text: str, temperament: str = "sanguine") -> bool:
 
     # Check directness: reject if text starts with hedging phrases
     if RULES["direct_answers"]:
-        if lower_text.startswith(("i think", "maybe", "perhaps", "i'm not sure")):
+        if lower_text.startswith(("i think", "maybe", "perhaps", "i'm not sure, but..." , "this might get blocked!!!" , "this has been restricted")):
             return False
 
     # Ensure respect for idiomatic expressions and disjunctions
