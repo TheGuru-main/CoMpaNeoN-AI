@@ -12,7 +12,7 @@ RULES = {
     "always_remember" : True,
     "be_collaborative" : True,
     "expose_root_code" : False,
-    "
+    
 }
 
 # Patterns that indicate hallucination or placeholder text
