@@ -269,3 +269,71 @@ function displayResearch(data) {
         container.innerHTML += `
             <div style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem;">
                 <h4 style="color:var(--neon-blue);">📚 Wikipedia Extract</h4>
+
+});
+
+document.getElementById('btnLogout').addEventListener('click', logout);
+
+document.getElementById('btnSettings').addEventListener('click', () => {
+    document.getElementById('settingsModal').style.display = 'flex';
+    if (currentUser) {
+        if (document.getElementById('settingsLanguage')) {
+            document.getElementById('settingsLanguage').value = currentUser.language || 'en';
+        }
+        if (document.getElementById('settingsTemperament')) {
+            document.getElementById('settingsTemperament').value = currentUser.temperament || 'sanguine';
+        }
+    }
+});
+
+document.getElementById('btnCloseSettings').addEventListener('click', () => {
+    document.getElementById('settingsModal').style.display = 'none';
+});
+
+document.getElementById('btnSaveSettings').addEventListener('click', async () => {
+    const language = document.getElementById('settingsLanguage').value;
+    const temperament = document.getElementById('settingsTemperament').value;
+    if (currentUser) {
+        currentUser.language = language;
+        currentUser.temperament = temperament;
+        localStorage.setItem('coMpaNeoN_user', JSON.stringify(currentUser));
+    }
+    document.getElementById('settingsModal').style.display = 'none';
+    alert('Local system preferences applied.');
+});
+
+document.getElementById('btnCloseResearch').addEventListener('click', () => {
+    document.getElementById('researchPanel').style.display = 'none';
+});
+
+// Setup bottom application navigation switches
+document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        const action = link.dataset.action;
+        if (action === 'research') {
+            openResearch();
+        } else if (action === 'workspace') {
+            loadWorkspaces();
+        } else if (action === 'train') {
+            const trainBtn = e.currentTarget;
+            trainBtn.style.opacity = '0.4';
+            api('/train', 'POST', { epochs: 5 }).then(data => alert(data.message || 'Model optimization cycle completed.')).catch(err => alert(`Training rejected: ${err.message}`)).finally(() => trainBtn.style.opacity = '1');
+        }
+    });
+});
+
+// ========== Initialization Engine Spark ==========
+if (authToken) {
+    try {
+        currentUser = JSON.parse(localStorage.getItem('coMpaNeoN_user') || '{}');
+        showScreen('mainScreen');
+        loadWorkspaces();
+    } catch (_) {
+        logout();
+    }
+} else {
+    showScreen('authScreen');
+}
