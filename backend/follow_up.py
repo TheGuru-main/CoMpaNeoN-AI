@@ -29,38 +29,6 @@ def extract_keywords(text: str, top_n=5):
     sorted_words = sorted(freq.items(), key=lambda x: x[1], reverse=True)
     return [w for w,_ in sorted_words[:top_n]]
 
-def generate_follow_ups(query: str, answer: str, domain: str = "general", max_questions=3):
-    """Generate follow-up questions using keywords and domain templates."""
-    keywords = extract_keywords(query)
-    if not keywords:
-        keywords = extract_keywords(answer)
-
-    questions = []
-    if domain == "code":
-        if keywords:
-            questions.append(f"Can you show me an example of using {keywords[0]}?")
-            questions.append(f"What are common errors with {keywords[0]}?")
-            questions.append(f"How does {keywords[0]} relate to {keywords[1] if len(keywords)>1 else 'other concepts'}?")
-    elif domain == "medical":
-        if keywords:
-            questions.append(f"What are the symptoms of {keywords[0]}?")
-            questions.append(f"What treatments are available for {keywords[0]}?")
-            questions.append(f"Are there any side effects of {keywords[0]}?")
-    elif domain == "business":
-        if keywords:
-            questions.append(f"How does {keywords[0]} impact small businesses?")
-            questions.append(f"What are the market trends for {keywords[0]}?")
-            questions.append(f"Can you explain {keywords[0]} with an example?")
-    else:
-        if keywords:
-            questions.append(f"Can you tell me more about {keywords[0]}?")
-            questions.append(f"How does {keywords[0]} work?")
-            questions.append(f"What are the key aspects of {keywords[0]}?")
-
-    # Ensure unique and limit
-    unique_questions = list(dict.fromkeys(questions))
-    return unique_questions[:max_questions]
-
 def extract_word_pairs(text: str):
     """
     Extract adjacent word pairs from text.
@@ -122,3 +90,35 @@ def extract_next_word_candidates(text: str, limit=5):
     )
 
     return candidates[:limit]
+
+def generate_follow_ups(query: str, answer: str, domain: str = "general", max_questions=3):
+    """Generate follow-up questions using keywords and domain templates."""
+    keywords = extract_keywords(query)
+    if not keywords:
+        keywords = extract_keywords(answer)
+
+    questions = []
+    if domain == "code":
+        if keywords:
+            questions.append(f"Can you show me an example of using {keywords[0]}?")
+            questions.append(f"What are common errors with {keywords[0]}?")
+            questions.append(f"How does {keywords[0]} relate to {keywords[1] if len(keywords)>1 else 'other concepts'}?")
+    elif domain == "medical":
+        if keywords:
+            questions.append(f"What are the symptoms of {keywords[0]}?")
+            questions.append(f"What treatments are available for {keywords[0]}?")
+            questions.append(f"Are there any side effects of {keywords[0]}?")
+    elif domain == "business":
+        if keywords:
+            questions.append(f"How does {keywords[0]} impact small businesses?")
+            questions.append(f"What are the market trends for {keywords[0]}?")
+            questions.append(f"Can you explain {keywords[0]} with an example?")
+    else:
+        if keywords:
+            questions.append(f"Can you tell me more about {keywords[0]}?")
+            questions.append(f"How does {keywords[0]} work?")
+            questions.append(f"What are the key aspects of {keywords[0]}?")
+
+    # Ensure unique and limit
+    unique_questions = list(dict.fromkeys(questions))
+    return unique_questions[:max_questions]
