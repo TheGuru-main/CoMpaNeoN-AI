@@ -1,8 +1,7 @@
 import os
 import re
 from datetime import datetime, timedelta
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import JWTError, jwt
 from fastapi import Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from database import SessionLocal
