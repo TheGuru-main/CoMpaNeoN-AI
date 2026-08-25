@@ -128,6 +128,15 @@ class SignupRequest(BaseModel):
 class MessageRequest(BaseModel):
     content: str
 
+class LoginRequest(BaseModel):
+    phone: str = Field(..., min_length=7, max_length=15)
+    password: str = Field(..., min_length=6, max_length=100)
+
+
+class WorkspaceCreate(BaseModel):
+    first_message: str = Field(..., min_length=1)
+    project_name: Optional[str] = Field(default=None, max_length=255)
+
 class GenerateRequest(BaseModel):
     prompt: str
     max_len: int = 500
