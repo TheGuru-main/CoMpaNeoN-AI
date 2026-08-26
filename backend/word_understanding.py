@@ -791,4 +791,123 @@ class WordUnderstanding:
 
         w_score = word_score(
             q_tokens,
-            doc_t
+            doc_text,
+            lang,
+        )
+
+        return (
+            l_score * 0.4
+            + w_score * 0.6
+        )
+
+    # ==================================================================
+    # EXPLICIT DOCUMENT RANKING
+    # ==================================================================
+
+    def rank_documents(
+        self,
+        query: str,
+        doc_ids: List[int],
+        lang: str = "en",
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank explicitly supplied documents using the local lexical
+        scoring system.
+
+        This does not perform grid retrieval.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        scored = []
+
+        for doc_id in doc_ids:
+
+            text = self.memory.get_doc(
+                doc_id
+            )
+
+            if not text:
+                continue
+
+            score = self.score_candidate(
+                query,
+                text,
+                lang,
+            )
+
+            scored.append({
+                "doc_id": doc_id,
+                "score": score,
+                "text": text,
+            })
+
+        scored.sort(
+            key=lambda item: item["score"],
+            reverse=True,
+        )
+
+        return scored
+
+    # ==================================================================
+    # COMPLETE UNDERSTANDING
+    # ==================================================================
+
+    def understand(
+        self,
+        query: str,
+        lang: str = "en",
+    ) -> dict:
+        """
+        Produce the structured understanding object consumed by the
+        higher-level prompt/context architecture.
+
+        This layer identifies:
+
+            - tokens
+            - three-route memory context
+            - symbols
+            - directive
+            - domain
+            - language
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        context = self.get_context(
+            query,
+            lang,
+        )
+
+        symbols = recognize_symbols(
+            query,
+            "general",
+        )
+
+        directive = detect_directive(
+            query,
+        )
+
+        domain = detect_domain(
+            query
+        )
+
+        return {
+            "context": context,
+            "tokens": tokens,
+            "symbols": symbols,
+            "directive": directive,
+            "domain": domain,
+            "language": lang,
+            "country" : country,
+            "state" : state,
+        }
