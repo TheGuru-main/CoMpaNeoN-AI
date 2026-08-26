@@ -771,4 +771,267 @@ class WordUnderstanding:
             })
 
         ranked.sort(
-            key=lambda item: item["sco
+            key=lambda item: item["score"],
+            reverse=True,
+        )
+
+        # ---------------------------------------------------------------
+        # TOP CONTEXT
+        # ---------------------------------------------------------------
+
+        context = "\n".join(
+            item["text"]
+            for item in ranked[:3]
+        )
+
+        self.memory_cache.set(
+            cache_key,
+            context,
+        )
+
+        return context
+
+    # =======================================================================
+    # LEXICAL CANDIDATE SCORE
+    # =======================================================================
+
+    def score_candidate(
+        self,
+        query: str,
+        doc_text: str,
+        lang: str = "en",
+    ) -> float:
+        """
+        Return the local lexical score for a candidate.
+
+        This remains separate from the higher-level candidate ranking
+        performed by ranking.score_candidate().
+        """
+
+        q_tokens = self._tokenize_query(
+            query,
+            lang,
+        )
+
+        if not q_tokens:
+            return 0.0
+
+        l_score = letter_score(
+            q_tokens,
+            doc_text,
+            lang,
+        )
+
+        w_score = word_score(
+            q_tokens,
+            doc_text,
+            lang,
+        )
+
+        return (
+            l_score * 0.4
+            + w_score * 0.6
+        )
+
+    # =======================================================================
+    # EXPLICIT DOCUMENT RANKING
+    # =======================================================================
+
+    def rank_documents(
+        self,
+        query: str,
+        doc_ids: List[int],
+        lang: str = "en",
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank explicitly supplied documents.
+        """
+
+        scored = []
+
+        for doc_id in doc_ids:
+
+            text = self.memory.get_doc(
+                doc_id
+            )
+
+            if not text:
+                continue
+
+            score = self.score_candidate(
+                query,
+                text,
+                lang,
+            )
+
+            scored.append({
+                "doc_id": doc_id,
+                "score": score,
+                "text": text,
+            })
+
+        scored.sort(
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+
+        return scored
+
+    # =======================================================================
+    # FULL UNDERSTANDING OBJECT
+    # =======================================================================
+
+    def understand(
+        self,
+        query: str,
+        lang: str = "en",
+        user_entries: Optional[Iterable[Any]] = None,
+    ) -> dict:
+        """
+        Produce the structured understanding state.
+
+        This is the bridge between retrieval and Prompt Manager.
+
+        It exposes the three routes explicitly so the upper architecture
+        can use them without confusing their responsibilities.
+        """
+
+        tokens = self._tokenize_query(
+            query,
+            lang,
+        )
+
+        domain = detect_domain(
+            query
+        )
+
+        symbols = recognize_symbols(
+            query,
+            domain,
+        )
+
+        directive = detect_directive(
+            query
+        )
+
+        word_routes = []
+
+        for token in tokens:
+
+            word_routes.append({
+                "word": (
+                    token.get("word", {})
+                    .get(
+                        "original",
+                        token.get(
+                            "original",
+                            token.get(
+                                "text",
+                                ""
+                            )
+                        )
+                    )
+                ),
+                "column": self.word_token_column(
+                    token
+                ),
+                "mod": WORD_GRID_COLUMNS,
+            })
+
+        letter_routes = []
+
+        for token in tokens:
+
+            letter_routes.append(
+                self.letter_token_route(
+                    token
+                )
+            )
+
+        storage_routes = []
+
+        if user_entries:
+
+            storage_routes = (
+                self.extract_long_words_from_user_entries(
+                    user_entries
+                )
+            )
+
+        context = self.get_context(
+            query=query,
+            lang=lang,
+            user_entries=user_entries,
+        )
+
+        return {
+            "context": context,
+
+            "tokens": tokens,
+
+            "domain": domain,
+
+            "directive": directive,
+
+            "symbols": symbols,
+
+            "language": normalize_lang(
+                lang
+            ),
+
+            "grid_routes": {
+                "word_token": {
+                    "modulus": WORD_GRID_COLUMNS,
+                    "routes": word_routes,
+                },
+
+                "letter_token": {
+                    "modulus": LETTER_GRID_MODULUS,
+                    "routes": letter_routes,
+                },
+
+                "user_entry_long_word": {
+                    "modulus": STORAGE_ROWS,
+                    "routes": storage_routes,
+                },
+            },
+        }
+
+    # =======================================================================
+    # PROJECT / WORKSPACE CONTEXT SUPPORT
+    # =======================================================================
+
+    def understand_project(
+        self,
+        query: str,
+        project_name: str,
+        messages: Optional[Iterable[Any]] = None,
+        lang: str = "en",
+    ) -> dict:
+        """
+        Project-aware understanding.
+
+        Workspace/project messages are supplied as user-entry memory.
+        They therefore participate in the third route only when their
+        words qualify as long-word storage entries.
+
+        The query itself continues to use the independent word-token
+        and letter-token routes.
+        """
+
+        messages = list(
+            messages or []
+        )
+
+        result = self.understand(
+            query=query,
+            lang=lang,
+            user_entries=messages,
+        )
+
+        result["project"] = {
+            "name": project_name,
+            "message_count": len(messages),
+        }
+
+        return result
