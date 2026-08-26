@@ -14,6 +14,7 @@ RULES = {
     "expose_root_code": False,
     "structured_vocabulary": True,
     "supportive": True,
+    "track_workflow": True,
 
 }
 
