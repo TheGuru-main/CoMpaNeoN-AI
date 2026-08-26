@@ -6,28 +6,50 @@ and the AI's last answer. Uses keyword extraction and simple templates.
 """
 
 import re
+from collections import defaultdict, Counter
+
 from intent_analyzer import detect_domain
 from symbols import recognize_symbols
 
-STOP_WORDS = {"the","a","an","is","are","was","were","be","been","being","have","has","had",
-              "do","does","did","will","would","shall","should","may","might","must","can","could",
-              "of","in","on","at","by","for","with","about","against","between","into","through",
-              "during","before","after","above","below","to","from","up","down","out","off","over",
-              "under","again","further","then","once","here","there","when","where","why","how",
-              "all","any","both","each","few","more","most","other","some","such","no","nor","not",
-              "only","own","same","so","than","too","very","s","t","just","don","now","i","me","my",
-              "we","our","ours","you","your","yours","he","him","his","she","her","hers","it","its",
-              "they","them","their","theirs","what","which","who","whom","this","that","these","those"}
+
+STOP_WORDS = {
+    "the","a","an","is","are","was","were","be","been","being","have","has","had",
+    "do","does","did","will","would","shall","should","may","might","must","can","could",
+    "of","in","on","at","by","for","with","about","against","between","into","through",
+    "during","before","after","above","below","to","from","up","down","out","off","over",
+    "under","again","further","then","once","here","there","when","where","why","how",
+    "all","any","both","each","few","more","most","other","some","such","no","nor","not",
+    "only","own","same","so","than","too","very","s","t","just","don","now","i","me","my",
+    "we","our","ours","you","your","yours","he","him","his","she","her","hers","it","its",
+    "they","them","their","theirs","what","which","who","whom","this","that","these","those"
+}
+
 
 def extract_keywords(text: str, top_n=5):
     """Extract top keywords excluding stop words."""
     words = re.findall(r"[a-zA-Z]+", text.lower())
-    filtered = [w for w in words if w not in STOP_WORDS and len(w) > 2]
+    filtered = [
+        w
+        for w in words
+        if w not in STOP_WORDS and len(w) > 2
+    ]
+
     freq = {}
+
     for w in filtered:
         freq[w] = freq.get(w, 0) + 1
-    sorted_words = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-    return [w for w,_ in sorted_words[:top_n]]
+
+    sorted_words = sorted(
+        freq.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    return [
+        w
+        for w, _ in sorted_words[:top_n]
+    ]
+
 
 def extract_word_pairs(text: str):
     """
@@ -42,7 +64,11 @@ def extract_word_pairs(text: str):
         a_programming
         programming_language
     """
-    words = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    words = re.findall(
+        r"[a-zA-Z0-9_]+",
+        text.lower()
+    )
 
     return [
         f"{words[i]}_{words[i + 1]}"
@@ -57,7 +83,11 @@ def extract_next_word_candidates(text: str, limit=5):
     This is intentionally lightweight and deterministic.
     It does not require embeddings or vector databases.
     """
-    words = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+
+    words = re.findall(
+        r"[a-zA-Z0-9_]+",
+        text.lower()
+    )
 
     if len(words) < 2:
         return []
@@ -65,6 +95,7 @@ def extract_next_word_candidates(text: str, limit=5):
     transitions = defaultdict(Counter)
 
     for i in range(len(words) - 1):
+
         current_word = words[i]
         next_word = words[i + 1]
 
@@ -76,7 +107,9 @@ def extract_next_word_candidates(text: str, limit=5):
     candidates = []
 
     for word, next_words in transitions.items():
+
         for next_word, count in next_words.most_common(limit):
+
             candidates.append({
                 "word": next_word,
                 "after": word,
@@ -90,6 +123,7 @@ def extract_next_word_candidates(text: str, limit=5):
     )
 
     return candidates[:limit]
+
 
 def generate_follow_ups(
     query: str,
@@ -119,13 +153,18 @@ def generate_follow_ups(
     questions = []
 
     primary = keywords[0]
-    secondary = keywords[1] if len(keywords) > 1 else None
+    secondary = (
+        keywords[1]
+        if len(keywords) > 1
+        else None
+    )
 
     # ---------------------------------------------------------
     # CONTEXTUAL QUESTIONS
     # ---------------------------------------------------------
 
     if domain == "code":
+
         questions.extend([
             f"Can you show me an example of using {primary}?",
             f"What are the common errors when using {primary}?",
@@ -137,26 +176,41 @@ def generate_follow_ups(
             )
 
     elif domain == "medical":
+
         questions.extend([
             f"What are the symptoms associated with {primary}?",
             f"What treatments are commonly used for {primary}?",
-            f"What should someone know before considering treatment for {primary}?",
+            (
+                f"What should someone know before considering "
+                f"treatment for {primary}?"
+            ),
         ])
 
     elif domain == "business":
+
         questions.extend([
             f"How does {primary} affect a business?",
-            f"What are the main considerations when dealing with {primary}?",
-            f"Can you give me a practical example involving {primary}?",
+            (
+                f"What are the main considerations when dealing "
+                f"with {primary}?"
+            ),
+            (
+                f"Can you give me a practical example involving "
+                f"{primary}?"
+            ),
         ])
 
     else:
+
         questions.extend([
             f"Can you explain {primary} in more detail?",
             f"How does {primary} work?",
-            f"What is the relationship between {primary} and {secondary}?"
-            if secondary
-            else f"What are the key aspects of {primary}?",
+            (
+                f"What is the relationship between "
+                f"{primary} and {secondary}?"
+                if secondary
+                else f"What are the key aspects of {primary}?"
+            ),
         ])
 
     # ---------------------------------------------------------
@@ -166,10 +220,15 @@ def generate_follow_ups(
     pairs = extract_word_pairs(query)
 
     if pairs:
+
         last_pair = pairs[-1]
 
         if "_" in last_pair:
-            first, second = last_pair.split("_", 1)
+
+            first, second = last_pair.split(
+                "_",
+                1
+            )
 
             questions.append(
                 f"How does {first} relate to {second}?"
@@ -182,9 +241,13 @@ def generate_follow_ups(
     unique_questions = []
 
     for question in questions:
+
         question = question.strip()
 
-        if question and question not in unique_questions:
+        if (
+            question
+            and question not in unique_questions
+        ):
             unique_questions.append(question)
 
     return unique_questions[:max_questions]
