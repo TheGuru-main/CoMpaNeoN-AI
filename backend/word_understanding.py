@@ -858,4 +858,146 @@ class WordUnderstanding:
         # SYMBOLS
         # --------------------------------------------------------------
 
-        enr
+        enrichment[
+            "symbols"
+        ] = recognize_symbols(
+            query,
+            domain,
+        )
+
+        # --------------------------------------------------------------
+        # CODE TERMS
+        # --------------------------------------------------------------
+
+        if domain == "code":
+
+            query_lower = query.lower()
+
+            for term, meaning in CODE_TERMS.items():
+
+                if term.lower() in query_lower:
+
+                    enrichment[
+                        "code_terms"
+                    ].append({
+                        "term": term,
+                        "meaning": meaning,
+                    })
+
+        return enrichment
+
+    # ==================================================================
+    # COMPLETE UNDERSTANDING
+    # ==================================================================
+
+    def understand(
+        self,
+        query: str,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """
+        Produce the complete structured understanding object.
+
+        This is the object that higher-level CoMpaNeoN components can
+        consume before prompt construction.
+
+        It contains:
+
+            context
+            tokens
+            symbols
+            directive
+            domain
+            language
+            code terms
+            route candidates
+
+        The memory routes remain explicitly visible so later ranking,
+        GridCV, and prompt-management layers can use them without
+        having to reconstruct how the query entered memory.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        # --------------------------------------------------------------
+        # QUERY ANALYSIS
+        # --------------------------------------------------------------
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        directive = detect_directive(
+            query
+        )
+
+        domain = detect_domain(
+            query
+        )
+
+        # --------------------------------------------------------------
+        # THREE-ROUTE RETRIEVAL
+        # --------------------------------------------------------------
+
+        routes = (
+            self._retrieve_three_routes(
+                query=query,
+                lang=lang,
+                limit=10,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # CONTEXT
+        # --------------------------------------------------------------
+
+        context = self.get_context(
+            query,
+            lang,
+        )
+
+        # --------------------------------------------------------------
+        # ENRICHMENT
+        # --------------------------------------------------------------
+
+        enrichment = (
+            self._build_enrichment(
+                query=query,
+                domain=domain,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # RETURN STRUCTURE
+        # --------------------------------------------------------------
+
+        return {
+            "query": query,
+
+            "context": context,
+
+            "tokens": tokens,
+
+            "routes": routes,
+
+            "symbols": enrichment[
+                "symbols"
+            ],
+
+            "code_terms": enrichment[
+                "code_terms"
+            ],
+
+            "directive": directive,
+
+            "domain": domain,
+
+            "language": lang,
+
+            "country" : country,
+
+            "state" : state,
+        }
