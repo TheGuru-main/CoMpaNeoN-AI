@@ -21,6 +21,7 @@ RULES = {
 HALLUCINATION_PATTERNS = [
     "i don't know",
     "i am not sure",
+    "solve it yourself",
     "to be honest",
     "as an ai",
     "i cannot provide",
