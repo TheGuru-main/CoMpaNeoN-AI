@@ -744,4 +744,369 @@ class WordChain:
                 },
                 "phrases": {
                     phrase: dict(counter)
-                    for phrase, c
+                    for phrase, counter
+                    in chain["phrases"].items()
+                },
+            }
+
+        return {
+            "word_frequency": dict(
+                self.word_frequency
+            ),
+            "pairs": dict(
+                self.pairs
+            ),
+            "transitions": {
+                word: dict(counter)
+                for word, counter
+                in self.transitions.items()
+            },
+            "phrase_chains": {
+                phrase: dict(counter)
+                for phrase, counter
+                in self.phrase_chains.items()
+            },
+            "source_statistics": {
+                source: dict(stats)
+                for source, stats
+                in self.source_statistics.items()
+            },
+            "source_chains": source_chains,
+        }
+
+    # -------------------------------------------------------------------
+    # DESERIALIZATION
+    # -------------------------------------------------------------------
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+    ) -> "WordChain":
+        """
+        Restore a WordChain from serialized state.
+        """
+
+        chain = cls()
+
+        chain.word_frequency.update(
+            data.get(
+                "word_frequency",
+                {},
+            )
+        )
+
+        chain.pairs.update(
+            data.get(
+                "pairs",
+                {},
+            )
+        )
+
+        for word, values in data.get(
+            "transitions",
+            {},
+        ).items():
+
+            chain.transitions[word].update(
+                values
+            )
+
+        for phrase, values in data.get(
+            "phrase_chains",
+            {},
+        ).items():
+
+            chain.phrase_chains[phrase].update(
+                values
+            )
+
+        for source, values in data.get(
+            "source_statistics",
+            {},
+        ).items():
+
+            chain.source_statistics[
+                source
+            ].update(values)
+
+        for source, values in data.get(
+            "source_chains",
+            {},
+        ).items():
+
+            source_chain = chain.source_chains[
+                source
+            ]
+
+            source_chain["words"].update(
+                values.get("words", {})
+            )
+
+            source_chain["pairs"].update(
+                values.get("pairs", {})
+            )
+
+            for word, transitions in values.get(
+                "transitions",
+                {},
+            ).items():
+
+                source_chain[
+                    "transitions"
+                ][word].update(
+                    transitions
+                )
+
+            for phrase, transitions in values.get(
+                "phrases",
+                {},
+            ).items():
+
+                source_chain[
+                    "phrases"
+                ][phrase].update(
+                    transitions
+                )
+
+        return chain
+
+    # -------------------------------------------------------------------
+    # SAVE
+    # -------------------------------------------------------------------
+
+    def save(
+        self,
+        path: str,
+    ) -> None:
+        """
+        Save the chain to JSON.
+        """
+
+        directory = os.path.dirname(path)
+
+        if directory:
+            os.makedirs(
+                directory,
+                exist_ok=True,
+            )
+
+        with open(
+            path,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            json.dump(
+                self.to_dict(),
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    # -------------------------------------------------------------------
+    # LOAD
+    # -------------------------------------------------------------------
+
+    @classmethod
+    def load(
+        cls,
+        path: str,
+    ) -> "WordChain":
+        """
+        Load an existing WordChain.
+
+        If the file does not exist, return an empty chain.
+        """
+
+        if not os.path.exists(path):
+            return cls()
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            data = json.load(f)
+
+        return cls.from_dict(data)
+
+    # -------------------------------------------------------------------
+    # UTILITY
+    # -------------------------------------------------------------------
+
+    @staticmethod
+    def _probability(
+        count: int,
+        total: int,
+    ) -> float:
+        """
+        Calculate a local transition probability.
+        """
+
+        if total <= 0:
+            return 0.0
+
+        return count / total
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT FACTORY
+# ---------------------------------------------------------------------------
+
+def create_word_chain(
+    path: Optional[str] = None,
+) -> WordChain:
+    """
+    Create or restore a WordChain.
+
+    If path is supplied and exists, the chain is restored.
+    """
+
+    if path:
+        return WordChain.load(path)
+
+    return WordChain()
+
+
+# ---------------------------------------------------------------------------
+# SIMPLE MODULE-LEVEL HELPERS
+# ---------------------------------------------------------------------------
+
+def extract_word_pairs(
+    text: str,
+) -> List[str]:
+    """
+    Compatibility helper for existing modules such as follow_up.py
+    and ranking.py.
+    """
+
+    words = clean_words(text)
+
+    return [
+        f"{words[i]}_{words[i + 1]}"
+        for i in range(len(words) - 1)
+    ]
+
+
+def extract_next_word_candidates(
+    text: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Compatibility helper.
+
+    Builds a temporary chain from supplied text.
+    """
+
+    chain = WordChain()
+    chain.add_text(
+        text,
+        source="conversation",
+    )
+
+    results = []
+
+    for word in clean_words(text):
+
+        candidates = chain.next_words(
+            word,
+            limit=limit,
+        )
+
+        results.extend(candidates)
+
+    # Remove duplicate transitions while preserving strongest counts.
+    seen = set()
+    unique = []
+
+    for result in sorted(
+        results,
+        key=lambda x: x["count"],
+        reverse=True,
+    ):
+
+        key = (
+            result["after"],
+            result["word"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(result)
+
+        if len(unique) >= limit:
+            break
+
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# TEST / DEVELOPMENT
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    chain = WordChain()
+
+    # Personal conversation knowledge.
+    chain.add_text(
+        "My project uses GSP for deterministic storage.",
+        source="project",
+    )
+
+    chain.add_text(
+        "GSP provides deterministic storage for the project.",
+        source="project",
+    )
+
+    # External knowledge.
+    chain.add_text(
+        "A deterministic system produces the same result for the same input.",
+        source="dictionary",
+    )
+
+    print(
+        "Project continuation:"
+    )
+
+    print(
+        chain.next_words(
+            "gsp",
+            limit=5,
+            source="project",
+        )
+    )
+
+    print(
+        "\nPhrase continuation:"
+    )
+
+    print(
+        chain.next_words_from_phrase(
+            "deterministic storage",
+            limit=5,
+        )
+    )
+
+    print(
+        "\nPair overlap:"
+    )
+
+    print(
+        chain.pair_overlap(
+            "GSP deterministic storage",
+            "The project uses GSP for deterministic storage.",
+        )
+    )
+
+    print(
+        "\nKnowledge profile:"
+    )
+
+    print(
+        chain.knowledge_profile()
+    )
