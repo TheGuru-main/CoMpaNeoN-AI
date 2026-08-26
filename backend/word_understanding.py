@@ -1,50 +1,21 @@
-"""
-Word Understanding Module
-
-CoMpaNeoN AI understanding layer.
-
-Three independent memory/grid entry routes:
-
-1. WORD TOKEN ROUTE
-   Query word tokens enter through the 26-column word-token grid.
-   Word token -> mod 26.
-
-2. LETTER TOKEN ROUTE
-   Query letter tokens enter through the letter-token route.
-   Letter token -> mod 1.
-   This route is independent of the word-token route.
-
-3. USER-ENTRY LONG-WORD STORAGE ROUTE
-   Long words found in the user's stored entries are treated as
-   memory-storage words, not query tokens.
-   Their storage route uses mod 64.
-   This route is independent from tokenization.
-
-The three routes converge only at candidate collection/ranking.
-
-Main GSP placement remains separate.
-Project/workspace context remains separate.
-Directive detection remains separate.
-Domain detection remains separate.
-
-The purpose of this module is to collect the strongest available
-context for Prompt Manager / CoMpaNeoN AI without replacing any
-existing architecture.
-"""
+from __future__ import annotations
 
 import hashlib
-from typing import List, Dict, Any, Optional, Iterable
+
+from typing import (
+    List,
+    Dict,
+    Any,
+)
 
 from tokenizer import (
     tokenize,
     normalize_lang,
     letter_score,
     word_score,
-    supported_languages,
 )
 
 from memory_grid import MemoryGrid
-from grid_crawler import crawl as grid_crawl
 
 from symbols import recognize_symbols
 from code_languages import CODE_TERMS
@@ -57,531 +28,448 @@ from ranking import score_candidate
 from intent_analyzer import detect_domain
 
 
-# ---------------------------------------------------------------------------
-# GRID CONSTANTS
-# ---------------------------------------------------------------------------
-
-WORD_GRID_COLUMNS = 26
-LETTER_GRID_MODULUS = 1
-STORAGE_ROWS = 64
-
-# Words above this length are treated as long-word storage candidates.
-# This does NOT alter the tokenizer.
-LONG_WORD_LENGTH = 8
-
-
 class WordUnderstanding:
+    """
+    Word Understanding / retrieval layer for CoMpaNeoN.
 
-    def __init__(self, memory_grid: MemoryGrid):
+    The memory architecture has THREE independent entry routes:
+
+        1. Letter Grid
+           └── letter-token mapping
+
+        2. Word Grid
+           └── complete word-token mapping
+               26 × 26
+
+               L   = word/name length
+               uID = L
+               S   = ΣuID
+               S   = L
+
+        3. Full-Text Grid
+           └── existing full-text placement/mapping
+
+    These routes are NOT merged at storage time.
+
+    They converge only during retrieval so that candidates can be
+    collected, compared, scored and ranked.
+
+    MemoryGrid remains authoritative for the actual storage-cell
+    calculations.
+    """
+
+    def __init__(
+        self,
+        memory_grid: MemoryGrid,
+    ):
         self.memory = memory_grid
 
         self.page_cache = PageCache()
         self.memory_cache = MemoryCache()
 
-    # =======================================================================
-    # BASIC HELPERS
-    # =======================================================================
+    # ==================================================================
+    # HASH
+    # ==================================================================
 
-    def _hash(self, text: str) -> str:
+    def _hash(
+        self,
+        text: str,
+    ) -> str:
+        """
+        Generate a deterministic hash for query/cache operations.
+        """
+
         return hashlib.sha256(
             text.encode("utf-8")
         ).hexdigest()
 
-    def _safe_int(self, value: Any, default: int = 0) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
+    # ==================================================================
+    # LETTER ROUTE
+    # ==================================================================
 
-    def _normalize_word(self, word: str) -> str:
-        return (
-            str(word)
-            .strip()
-            .lower()
-        )
-
-    # =======================================================================
-    # ROUTE 1
-    # WORD TOKEN -> MOD 26
-    # =======================================================================
-
-    def word_token_column(
+    def _retrieve_letter_route(
         self,
-        token: Dict[str, Any],
-    ) -> int:
-        """
-        Determine the word-token column.
-
-        This route is strictly word-token based.
-
-        The tokenizer's word token provides the column value.
-        The result is normalized through mod 26.
-
-        No row is generated here.
-        No mod 64 is performed here.
-        """
-
-        word_data = token.get("word", token)
-
-        raw_column = word_data.get(
-            "col",
-            word_data.get("column", 0)
-        )
-
-        column = self._safe_int(
-            raw_column
-        )
-
-        return column % WORD_GRID_COLUMNS
-
-    # =======================================================================
-    # ROUTE 2
-    # LETTER TOKEN -> MOD 1
-    # =======================================================================
-
-    def letter_token_route(
-        self,
-        token: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Determine the independent letter-token route.
-
-        Letter-token routing is deliberately separate from word-token
-        routing.
-
-        The letter route uses mod 1.
-
-        No mod 26 is applied here.
-        No mod 64 is applied here.
-        """
-
-        letters = []
-
-        # Different tokenizer versions may expose letters differently.
-        raw_letters = token.get("letters")
-
-        if raw_letters:
-            if isinstance(raw_letters, str):
-                letters = list(raw_letters)
-            elif isinstance(raw_letters, Iterable):
-                letters = list(raw_letters)
-
-        # If the tokenizer exposes an original token but no explicit
-        # letter list, preserve the letters directly for this route.
-        if not letters:
-            original = (
-                token.get("original")
-                or token.get("text")
-                or token.get("token")
-                or ""
-            )
-
-            if isinstance(original, str):
-                letters = list(original)
-
-        routes = []
-
-        for letter in letters:
-            if not letter:
-                continue
-
-            # Letter token itself is preserved.
-            # Its routing modulus is explicitly 1.
-            routes.append({
-                "letter": letter,
-                "mod": LETTER_GRID_MODULUS,
-                "route": "letter_token",
-            })
-
-        return {
-            "route": "letter_token",
-            "modulus": LETTER_GRID_MODULUS,
-            "letters": routes,
-        }
-
-    # =======================================================================
-    # ROUTE 3
-    # USER ENTRY LONG WORD -> MOD 64
-    # =======================================================================
-
-    def long_word_storage_row(
-        self,
-        word: str,
-    ) -> Optional[int]:
-        """
-        Map a long word from user-entry storage to the 64-row storage
-        space.
-
-        IMPORTANT:
-
-        This is NOT the query word-token route.
-
-        It exists specifically for long words originating from stored
-        user entries.
-
-        The word length is used for the 64-row storage mapping.
-        """
-
-        normalized = self._normalize_word(
-            word
-        )
-
-        if len(normalized) < LONG_WORD_LENGTH:
-            return None
-
-        return len(normalized) % STORAGE_ROWS
-
-    def extract_long_words_from_user_entries(
-        self,
-        entries: Iterable[Any],
+        token: dict,
     ) -> List[Dict[str, Any]]:
         """
-        Extract long words from stored user entries.
+        Retrieve through the Letter Grid.
 
-        Entries may be:
+        The tokenizer supplies the letter-token indices.
 
-        - Message objects
-        - dictionaries containing 'content'
-        - strings
-
-        This function does not use query token positions.
+        This route does NOT use the Word Grid's L/S calculation.
+        It does NOT use the Full-Text Grid's placement calculation.
         """
 
-        results = []
+        results: List[Dict[str, Any]] = []
+
+        letters = token.get(
+            "letter",
+            [],
+        )
+
+        if not letters:
+            return results
+
         seen = set()
 
-        for entry in entries or []:
+        for letter_index in letters:
 
-            if isinstance(entry, str):
-                text = entry
+            entries = self.memory.get_letters_at(
+                letter_index
+            )
 
-            elif isinstance(entry, dict):
-                text = (
-                    entry.get("content")
-                    or entry.get("text")
-                    or ""
+            for entry in entries:
+
+                key = (
+                    entry.get("doc_id"),
+                    entry.get("original"),
                 )
 
-            else:
-                text = getattr(
-                    entry,
-                    "content",
-                    ""
-                )
-
-            if not text:
-                continue
-
-            try:
-                tokens = tokenize(
-                    text,
-                    "en",
-                )
-            except Exception:
-                tokens = []
-
-            # Prefer tokenizer words when available.
-            words = []
-
-            for token in tokens:
-                word_data = token.get(
-                    "word",
-                    {}
-                )
-
-                word = (
-                    word_data.get("original")
-                    or word_data.get("word")
-                    or token.get("original")
-                    or token.get("text")
-                    or token.get("token")
-                )
-
-                if word:
-                    words.append(
-                        str(word)
-                    )
-
-            # Safe fallback when tokenizer does not expose word fields.
-            if not words:
-                words = text.split()
-
-            for word in words:
-
-                normalized = self._normalize_word(
-                    word
-                )
-
-                if len(normalized) < LONG_WORD_LENGTH:
+                if key in seen:
                     continue
 
-                if normalized in seen:
-                    continue
+                seen.add(key)
 
-                seen.add(normalized)
+                result = dict(entry)
 
-                row = self.long_word_storage_row(
-                    normalized
-                )
+                result["retrieval_route"] = "letter"
+                result["route_score"] = 1.0
 
-                if row is None:
-                    continue
-
-                results.append({
-                    "word": normalized,
-                    "length": len(normalized),
-                    "row": row,
-                    "mod": STORAGE_ROWS,
-                    "route": "user_entry_long_word",
-                })
+                results.append(result)
 
         return results
 
-    # =======================================================================
-    # TOKENIZATION
-    # =======================================================================
+    # ==================================================================
+    # WORD ROUTE
+    # ==================================================================
 
-    def _tokenize_query(
+    def _retrieve_word_route(
+        self,
+        token: dict,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve through the 26 × 26 Word Grid.
+
+        Word Grid definition:
+
+            L   = name length
+            uID = L
+            S   = ΣuID
+            S   = L
+
+        Therefore:
+
+            (L, S)
+
+        is the word's Word Grid coordinate.
+
+        The actual coordinate conversion/storage convention belongs
+        to MemoryGrid. WordUnderstanding does not create a second
+        Word Grid formula here.
+        """
+
+        word = token.get("word")
+
+        if not word:
+            return []
+
+        # --------------------------------------------------------------
+        # The tokenizer is authoritative for the word token.
+        # --------------------------------------------------------------
+
+        L = int(
+            word.get("L", 0)
+        )
+
+        S = int(
+            word.get("word_S", L)
+        )
+
+        if L <= 0:
+            return []
+
+        # --------------------------------------------------------------
+        # Prefer MemoryGrid's authoritative Word Grid resolver.
+        #
+        # This keeps storage and retrieval mathematically identical.
+        # --------------------------------------------------------------
+
+        if hasattr(
+            self.memory,
+            "get_word_cell",
+        ):
+            row, col = self.memory.get_word_cell(
+                L,
+                S,
+            )
+
+            entries = self.memory.get_words_at(
+                row,
+                col,
+            )
+
+            results = []
+
+            for entry in entries:
+
+                result = dict(entry)
+
+                result["retrieval_route"] = "word"
+                result["route_score"] = 1.0
+
+                results.append(result)
+
+            return results
+
+        # --------------------------------------------------------------
+        # Compatibility fallback.
+        #
+        # If the older MemoryGrid has not yet exposed get_word_cell(),
+        # use the explicit 26 × 26 (L,S) coordinate.
+        #
+        # The permanent implementation should keep the resolver in
+        # MemoryGrid so storage and retrieval cannot diverge.
+        # --------------------------------------------------------------
+
+        word_grid_size = getattr(
+            self.memory,
+            "WORD_GRID_SIZE",
+            26,
+        )
+
+        row = (
+            (L - 1)
+            % word_grid_size
+        ) + 1
+
+        col = (
+            S
+            % word_grid_size
+        )
+
+        entries = self.memory.get_words_at(
+            row,
+            col,
+        )
+
+        results = []
+
+        for entry in entries:
+
+            result = dict(entry)
+
+            result["retrieval_route"] = "word"
+            result["route_score"] = 1.0
+
+            results.append(result)
+
+        return results
+
+    # ==================================================================
+    # FULL-TEXT ROUTE
+    # ==================================================================
+
+    def _retrieve_fulltext_route(
+        self,
+        token: dict,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve through the independent Full-Text Grid.
+
+        This route does NOT use the Letter Grid mapping.
+
+        This route does NOT use the Word Grid coordinate.
+
+        The established Full-Text placement remains authoritative.
+
+        For the existing full-text mapping:
+
+            L = word length
+            S = word S
+            c = word column/index
+
+            start_row = ((L + S - 1) % rows) + 1
+            start_col = c % cols
+        """
+
+        word = token.get("word")
+
+        if not word:
+            return []
+
+        L = int(
+            word.get("L", 0)
+        )
+
+        S = int(
+            word.get("word_S", L)
+        )
+
+        c = int(
+            word.get("col", 0)
+        )
+
+        if L <= 0:
+            return []
+
+        # --------------------------------------------------------------
+        # Full-Text Grid placement.
+        # --------------------------------------------------------------
+
+        start_row = (
+            (L + S - 1)
+            % self.memory.rows
+        ) + 1
+
+        start_col = (
+            c
+            % self.memory.cols
+        )
+
+        entries = self.memory.get_tokens_at(
+            start_row,
+            start_col,
+        )
+
+        results = []
+
+        for entry in entries[:limit]:
+
+            result = dict(entry)
+
+            result["retrieval_route"] = "fulltext"
+            result["route_score"] = 1.0
+
+            results.append(result)
+
+        return results
+
+    # ==================================================================
+    # THREE-ROUTE RETRIEVAL
+    # ==================================================================
+
+    def _retrieve_three_routes(
         self,
         query: str,
         lang: str,
-    ) -> List[Dict[str, Any]]:
-
-        try:
-            return tokenize(
-                query,
-                lang,
-            )
-        except Exception:
-            return []
-
-    # =======================================================================
-    # ROUTE 1 CRAWL
-    # =======================================================================
-
-    def _crawl_word_token_route(
-        self,
-        tokens: List[Dict[str, Any]],
         limit: int,
     ) -> List[Dict[str, Any]]:
         """
-        Crawl memory through the word-token / 26-column route.
+        Enter the memory architecture through all three independent
+        routes.
 
-        This route does not calculate a 64-row location.
+                         QUERY
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+             ▼             ▼             ▼
+        LETTER GRID    WORD GRID    FULL-TEXT GRID
+             │             │             │
+             └─────────────┼─────────────┘
+                           │
+                           ▼
+                      CANDIDATES
+                           │
+                           ▼
+                       RANKING
 
-        The crawler receives the column route independently.
+        A candidate reached through multiple routes is retained as
+        one candidate while its route evidence is accumulated.
         """
 
-        results = []
-
-        seen = set()
-
-        for token in tokens:
-
-            column = self.word_token_column(
-                token
-            )
-
-            # The existing crawler requires a row.
-            # Do not manufacture a GSP row here.
-            #
-            # The route is therefore represented explicitly and
-            # handed to the crawler only when the underlying memory
-            # implementation supports column-first traversal.
-
-            try:
-                token_results = grid_crawl(
-                    self.memory,
-                    None,
-                    column,
-                    limit=limit,
-                    route="word_token",
-                )
-            except TypeError:
-                # Backward compatibility with the existing crawler
-                # signature. The route information remains attached
-                # to the result collection.
-                token_results = []
-
-            for result in token_results:
-
-                result = dict(result)
-
-                result["_understanding_route"] = (
-                    "word_token"
-                )
-
-                result["_word_column"] = column
-
-                key = (
-                    result.get("doc_id"),
-                    result.get("original"),
-                    "word_token",
-                    column,
-                )
-
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                results.append(result)
-
-        return results
-
-    # =======================================================================
-    # ROUTE 2 CRAWL
-    # =======================================================================
-
-    def _crawl_letter_token_route(
-        self,
-        tokens: List[Dict[str, Any]],
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        """
-        Crawl memory through the independent letter-token route.
-
-        The route is intentionally not merged with the word-token
-        column calculation.
-        """
-
-        results = []
-
-        seen = set()
-
-        for token in tokens:
-
-            letter_route = self.letter_token_route(
-                token
-            )
-
-            for letter_data in letter_route["letters"]:
-
-                letter = letter_data["letter"]
-
-                try:
-                    token_results = grid_crawl(
-                        self.memory,
-                        None,
-                        None,
-                        limit=limit,
-                        route="letter_token",
-                        letter=letter,
-                        modulus=LETTER_GRID_MODULUS,
-                    )
-                except TypeError:
-                    token_results = []
-
-                for result in token_results:
-
-                    result = dict(result)
-
-                    result["_understanding_route"] = (
-                        "letter_token"
-                    )
-
-                    result["_letter"] = letter
-
-                    key = (
-                        result.get("doc_id"),
-                        result.get("original"),
-                        "letter_token",
-                        letter,
-                    )
-
-                    if key in seen:
-                        continue
-
-                    seen.add(key)
-                    results.append(result)
-
-        return results
-
-    # =======================================================================
-    # ROUTE 3 CRAWL
-    # =======================================================================
-
-    def _crawl_user_entry_long_word_route(
-        self,
-        user_entries: Iterable[Any],
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        """
-        Crawl memory through long words originating from user entries.
-
-        This is the only understanding route that uses mod 64.
-
-        It is not derived from the query word token.
-        """
-
-        long_words = (
-            self.extract_long_words_from_user_entries(
-                user_entries
-            )
+        tokens = tokenize(
+            query,
+            lang,
         )
 
-        results = []
+        if not tokens:
+            return []
 
-        seen = set()
+        # --------------------------------------------------------------
+        # Candidate collection.
+        #
+        # Do NOT globally discard a result simply because another route
+        # already found the same document.
+        #
+        # Instead, preserve route evidence.
+        # --------------------------------------------------------------
 
-        for item in long_words:
+        candidates: Dict[Any, Dict[str, Any]] = {}
 
-            row = item["row"]
+        for token in tokens:
 
-            try:
-                token_results = grid_crawl(
-                    self.memory,
-                    row,
-                    None,
-                    limit=limit,
-                    route="user_entry_long_word",
-                    word=item["word"],
-                    modulus=STORAGE_ROWS,
+            # ==========================================================
+            # ROUTE 1 — LETTER GRID
+            # ==========================================================
+
+            letter_results = (
+                self._retrieve_letter_route(
+                    token
                 )
-            except TypeError:
-                token_results = []
+            )
 
-            for result in token_results:
+            self._merge_route_results(
+                candidates,
+                letter_results,
+                "letter",
+            )
 
-                result = dict(result)
+            # ==========================================================
+            # ROUTE 2 — WORD GRID
+            # ==========================================================
 
-                result["_understanding_route"] = (
-                    "user_entry_long_word"
+            word_results = (
+                self._retrieve_word_route(
+                    token
                 )
+            )
 
-                result["_storage_word"] = (
-                    item["word"]
+            self._merge_route_results(
+                candidates,
+                word_results,
+                "word",
+            )
+
+            # ==========================================================
+            # ROUTE 3 — FULL-TEXT GRID
+            # ==========================================================
+
+            fulltext_results = (
+                self._retrieve_fulltext_route(
+                    token,
+                    limit,
                 )
+            )
 
-                result["_storage_row"] = row
+            self._merge_route_results(
+                candidates,
+                fulltext_results,
+                "fulltext",
+            )
 
-                key = (
-                    result.get("doc_id"),
-                    result.get("original"),
-                    "user_entry_long_word",
-                    item["word"],
-                    row,
-                )
+        return list(
+            candidates.values()
+        )
 
-                if key in seen:
-                    continue
+    # ==================================================================
+    # ROUTE MERGING
+    # ==================================================================
 
-                seen.add(key)
-                results.append(result)
-
-        return results
-
-    # =======================================================================
-    # CANDIDATE DOCUMENT COLLECTION
-    # =======================================================================
-
-    def _collect_candidate_documents(
+    def _merge_route_results(
         self,
+        candidates: Dict[Any, Dict[str, Any]],
         results: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        route: str,
+    ) -> None:
+        """
+        Merge retrieval evidence from one route into the unified
+        candidate collection.
 
-        candidate_docs = []
+        Storage remains separate.
 
-        seen_doc_ids = set()
+        Only the retrieval evidence is unified here.
+        """
 
         for result in results:
 
@@ -592,12 +480,184 @@ class WordUnderstanding:
             if doc_id is None:
                 continue
 
-            if doc_id in seen_doc_ids:
-                continue
+            if doc_id not in candidates:
 
-            seen_doc_ids.add(
-                doc_id
+                candidates[doc_id] = {
+                    "doc_id": doc_id,
+                    "originals": [],
+                    "routes": [],
+                    "route_hits": {},
+                    "entries": [],
+                }
+
+            candidate = candidates[doc_id]
+
+            # ----------------------------------------------------------
+            # Preserve original token evidence.
+            # ----------------------------------------------------------
+
+            original = result.get(
+                "original"
             )
+
+            if (
+                original
+                and original not in candidate["originals"]
+            ):
+                candidate["originals"].append(
+                    original
+                )
+
+            # ----------------------------------------------------------
+            # Preserve route evidence.
+            # ----------------------------------------------------------
+
+            if route not in candidate["routes"]:
+                candidate["routes"].append(
+                    route
+                )
+
+            candidate["route_hits"][route] = (
+                candidate["route_hits"].get(
+                    route,
+                    0,
+                ) + 1
+            )
+
+            # ----------------------------------------------------------
+            # Preserve the actual retrieval entry.
+            # ----------------------------------------------------------
+
+            candidate["entries"].append(
+                result
+            )
+
+    # ==================================================================
+    # CONTEXT RETRIEVAL
+    # ==================================================================
+
+    def get_context(
+        self,
+        query: str,
+        lang: str = "en",
+        limit: int = 10,
+    ) -> str:
+        """
+        Retrieve and rank context from MemoryGrid.
+
+        The query enters through:
+
+            Letter Grid
+            Word Grid
+            Full-Text Grid
+
+        These remain independent during storage and retrieval.
+
+        They are unified only when candidate documents are assembled
+        for ranking.
+
+        Ranking then determines which documents become context for the
+        prompt/context architecture.
+        """
+
+        if not query:
+            return ""
+
+        lang = normalize_lang(
+            lang
+        )
+
+        # --------------------------------------------------------------
+        # Cache
+        # --------------------------------------------------------------
+
+        cached = self.memory_cache.get(
+            query
+        )
+
+        if cached:
+            return cached
+
+        # --------------------------------------------------------------
+        # Tokenize
+        # --------------------------------------------------------------
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        if not tokens:
+            self.memory_cache.set(
+                query,
+                "",
+            )
+
+            return ""
+
+        # --------------------------------------------------------------
+        # Directive
+        # --------------------------------------------------------------
+
+        directive = detect_directive(
+            query
+        )
+
+        # --------------------------------------------------------------
+        # Certain directive types can benefit from a slightly wider
+        # retrieval window.
+        # --------------------------------------------------------------
+
+        crawl_limit = (
+            limit + 2
+            if directive in {
+                "entity_identity",
+                "location",
+            }
+            else limit
+        )
+
+        # --------------------------------------------------------------
+        # THREE MEMORY ROUTES
+        # --------------------------------------------------------------
+
+        candidates = self._retrieve_three_routes(
+            query=query,
+            lang=lang,
+            limit=crawl_limit,
+        )
+
+        if not candidates:
+
+            self.memory_cache.set(
+                query,
+                "",
+            )
+
+            return ""
+
+        # --------------------------------------------------------------
+        # DOMAIN
+        # --------------------------------------------------------------
+
+        domain = detect_domain(
+            query
+        )
+
+        # --------------------------------------------------------------
+        # COLLECT DOCUMENTS
+        # --------------------------------------------------------------
+
+        candidate_docs = []
+
+        for candidate in candidates:
+
+            doc_id = candidate.get(
+                "doc_id"
+            )
+
+            if doc_id is None:
+                continue
 
             doc_text = self.memory.get_doc(
                 doc_id
@@ -609,143 +669,32 @@ class WordUnderstanding:
             candidate_docs.append({
                 "doc_id": doc_id,
                 "text": doc_text,
-                "routes": [
-                    result.get(
-                        "_understanding_route"
-                    )
-                ],
+                "routes": candidate.get(
+                    "routes",
+                    [],
+                ),
+                "route_hits": candidate.get(
+                    "route_hits",
+                    {},
+                ),
+                "entries": candidate.get(
+                    "entries",
+                    [],
+                ),
             })
-
-        return candidate_docs
-
-    # =======================================================================
-    # CONTEXT RETRIEVAL
-    # =======================================================================
-
-    def get_context(
-        self,
-        query: str,
-        lang: str = "en",
-        limit: int = 10,
-        user_entries: Optional[Iterable[Any]] = None,
-    ) -> str:
-        """
-        Retrieve and rank context from the three independent routes.
-
-        Routes:
-
-            word token -> mod 26
-            letter token -> mod 1
-            user-entry long word -> mod 64
-
-        The routes converge only after retrieval.
-        """
-
-        cache_key = (
-            f"{query}|{normalize_lang(lang)}"
-        )
-
-        cached = self.memory_cache.get(
-            cache_key
-        )
-
-        if cached:
-            return cached
-
-        tokens = self._tokenize_query(
-            query,
-            lang,
-        )
-
-        if not tokens:
-            return ""
-
-        directive = detect_directive(
-            query
-        )
-
-        crawl_limit = (
-            limit + 2
-            if directive in {
-                "entity_identity",
-                "location",
-            }
-            else limit
-        )
-
-        # ---------------------------------------------------------------
-        # THREE INDEPENDENT ENTRY ROUTES
-        # ---------------------------------------------------------------
-
-        results = []
-
-        # Route 1: word token -> mod 26
-        word_results = (
-            self._crawl_word_token_route(
-                tokens,
-                crawl_limit,
-            )
-        )
-
-        results.extend(
-            word_results
-        )
-
-        # Route 2: letter token -> mod 1
-        letter_results = (
-            self._crawl_letter_token_route(
-                tokens,
-                crawl_limit,
-            )
-        )
-
-        results.extend(
-            letter_results
-        )
-
-        # Route 3: user's stored long words -> mod 64
-        if user_entries:
-            storage_results = (
-                self._crawl_user_entry_long_word_route(
-                    user_entries,
-                    crawl_limit,
-                )
-            )
-
-            results.extend(
-                storage_results
-            )
-
-        # ---------------------------------------------------------------
-        # NO CANDIDATES
-        # ---------------------------------------------------------------
-
-        candidate_docs = (
-            self._collect_candidate_documents(
-                results
-            )
-        )
 
         if not candidate_docs:
 
             self.memory_cache.set(
-                cache_key,
+                query,
                 "",
             )
 
             return ""
 
-        # ---------------------------------------------------------------
-        # DOMAIN
-        # ---------------------------------------------------------------
-
-        domain = detect_domain(
-            query
-        )
-
-        # ---------------------------------------------------------------
-        # RANK
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------
+        # RANK CANDIDATE DOCUMENTS
+        # --------------------------------------------------------------
 
         ranked = []
 
@@ -768,16 +717,26 @@ class WordUnderstanding:
                 "score": score_result["total"],
                 "scores": score_result["scores"],
                 "routes": doc["routes"],
+                "route_hits": doc["route_hits"],
             })
+
+        # --------------------------------------------------------------
+        # PRIMARY RANK
+        #
+        # The established ranking system remains authoritative.
+        #
+        # Route information is preserved as retrieval evidence rather
+        # than being silently turned into an invented scoring formula.
+        # --------------------------------------------------------------
 
         ranked.sort(
             key=lambda item: item["score"],
             reverse=True,
         )
 
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------
         # TOP CONTEXT
-        # ---------------------------------------------------------------
+        # --------------------------------------------------------------
 
         context = "\n".join(
             item["text"]
@@ -785,15 +744,15 @@ class WordUnderstanding:
         )
 
         self.memory_cache.set(
-            cache_key,
+            query,
             context,
         )
 
         return context
 
-    # =======================================================================
-    # LEXICAL CANDIDATE SCORE
-    # =======================================================================
+    # ==================================================================
+    # LOCAL LEXICAL SCORE
+    # ==================================================================
 
     def score_candidate(
         self,
@@ -802,13 +761,21 @@ class WordUnderstanding:
         lang: str = "en",
     ) -> float:
         """
-        Return the local lexical score for a candidate.
+        Calculate the local lexical similarity score.
 
-        This remains separate from the higher-level candidate ranking
-        performed by ranking.score_candidate().
+        Letter and Word scoring remain separate.
+
+            letter = 40%
+            word   = 60%
+
+        This method is separate from the global ranking.py scorer.
         """
 
-        q_tokens = self._tokenize_query(
+        lang = normalize_lang(
+            lang
+        )
+
+        q_tokens = tokenize(
             query,
             lang,
         )
@@ -824,214 +791,4 @@ class WordUnderstanding:
 
         w_score = word_score(
             q_tokens,
-            doc_text,
-            lang,
-        )
-
-        return (
-            l_score * 0.4
-            + w_score * 0.6
-        )
-
-    # =======================================================================
-    # EXPLICIT DOCUMENT RANKING
-    # =======================================================================
-
-    def rank_documents(
-        self,
-        query: str,
-        doc_ids: List[int],
-        lang: str = "en",
-    ) -> List[Dict[str, Any]]:
-        """
-        Rank explicitly supplied documents.
-        """
-
-        scored = []
-
-        for doc_id in doc_ids:
-
-            text = self.memory.get_doc(
-                doc_id
-            )
-
-            if not text:
-                continue
-
-            score = self.score_candidate(
-                query,
-                text,
-                lang,
-            )
-
-            scored.append({
-                "doc_id": doc_id,
-                "score": score,
-                "text": text,
-            })
-
-        scored.sort(
-            key=lambda x: x["score"],
-            reverse=True,
-        )
-
-        return scored
-
-    # =======================================================================
-    # FULL UNDERSTANDING OBJECT
-    # =======================================================================
-
-    def understand(
-        self,
-        query: str,
-        lang: str = "en",
-        user_entries: Optional[Iterable[Any]] = None,
-    ) -> dict:
-        """
-        Produce the structured understanding state.
-
-        This is the bridge between retrieval and Prompt Manager.
-
-        It exposes the three routes explicitly so the upper architecture
-        can use them without confusing their responsibilities.
-        """
-
-        tokens = self._tokenize_query(
-            query,
-            lang,
-        )
-
-        domain = detect_domain(
-            query
-        )
-
-        symbols = recognize_symbols(
-            query,
-            domain,
-        )
-
-        directive = detect_directive(
-            query
-        )
-
-        word_routes = []
-
-        for token in tokens:
-
-            word_routes.append({
-                "word": (
-                    token.get("word", {})
-                    .get(
-                        "original",
-                        token.get(
-                            "original",
-                            token.get(
-                                "text",
-                                ""
-                            )
-                        )
-                    )
-                ),
-                "column": self.word_token_column(
-                    token
-                ),
-                "mod": WORD_GRID_COLUMNS,
-            })
-
-        letter_routes = []
-
-        for token in tokens:
-
-            letter_routes.append(
-                self.letter_token_route(
-                    token
-                )
-            )
-
-        storage_routes = []
-
-        if user_entries:
-
-            storage_routes = (
-                self.extract_long_words_from_user_entries(
-                    user_entries
-                )
-            )
-
-        context = self.get_context(
-            query=query,
-            lang=lang,
-            user_entries=user_entries,
-        )
-
-        return {
-            "context": context,
-
-            "tokens": tokens,
-
-            "domain": domain,
-
-            "directive": directive,
-
-            "symbols": symbols,
-
-            "language": normalize_lang(
-                lang
-            ),
-
-            "grid_routes": {
-                "word_token": {
-                    "modulus": WORD_GRID_COLUMNS,
-                    "routes": word_routes,
-                },
-
-                "letter_token": {
-                    "modulus": LETTER_GRID_MODULUS,
-                    "routes": letter_routes,
-                },
-
-                "user_entry_long_word": {
-                    "modulus": STORAGE_ROWS,
-                    "routes": storage_routes,
-                },
-            },
-        }
-
-    # =======================================================================
-    # PROJECT / WORKSPACE CONTEXT SUPPORT
-    # =======================================================================
-
-    def understand_project(
-        self,
-        query: str,
-        project_name: str,
-        messages: Optional[Iterable[Any]] = None,
-        lang: str = "en",
-    ) -> dict:
-        """
-        Project-aware understanding.
-
-        Workspace/project messages are supplied as user-entry memory.
-        They therefore participate in the third route only when their
-        words qualify as long-word storage entries.
-
-        The query itself continues to use the independent word-token
-        and letter-token routes.
-        """
-
-        messages = list(
-            messages or []
-        )
-
-        result = self.understand(
-            query=query,
-            lang=lang,
-            user_entries=messages,
-        )
-
-        result["project"] = {
-            "name": project_name,
-            "message_count": len(messages),
-        }
-
-        return result
+            doc_t
