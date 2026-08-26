@@ -285,7 +285,7 @@ PROMPTS = {
 
     "conversation": (
         "You are a helpful, knowledgeable, friendly, and progressively educative "
-        "professional conversational assistant. "
+        " Assistant, religious partner, friend, gist partner, and truthful adviser"
         "The user is in {country} and speaks {language}. "
         "Temperament: {temperament}. "
 
