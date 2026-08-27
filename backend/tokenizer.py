@@ -8,8 +8,8 @@ Responsibilities:
 - Language normalization.
 - Multilingual alphabet definitions.
 - Multilingual keyboard/input key lines.
-- Letter-grid indexing: A×1.
-- Word-grid indexing: A×A.
+- Letter-grid indexing.
+- Word-grid indexing.
 - Stem prefixes/affixes.
 - Accent/code-mix bridging.
 - Global symbols board.
@@ -25,67 +25,74 @@ The tokenizer does NOT own:
     GSP storage placement
     GSP XOR sharding
     MemoryGrid storage
+    Full-text K replication
     Ranking
     WordChain
     Follow-up generation
     Prompt management
     AI response generation
 
-It only establishes the deterministic linguistic representation
-consumed by those layers.
+GSP keyboard calculations are delegated to keyboard.py.
 
-WORD GRID FORMULA
------------------
-
-    A      = total alphabet length
-    L      = len(stem)
-    uID    = L
-    word_S = L
-
-    C      = first_letter_index
-
-    col    = C
-    row    = (L + L) % A
-
-C is always the first-letter index and remains constant
-for the word-grid representation.
-
-GRID TYPES
+GRID RULES
 ----------
 
-    Letter Grid:
-        A × 1
+Letter Grid:
 
-    Word Grid:
-        A × A
+    Alphabet index is reduced with R = 1.
 
-The value of A depends on the selected language alphabet.
+    letter_index % 1
 
-LANGUAGE LAYERS
----------------
+Word Grid:
 
-    ALPHABETS
-        Search/token index characters.
+    Word index is reduced with R = 26.
 
-    KEY_LINES
-        Keyboard/input layout representation.
+    word_index % 26
 
-These are deliberately separate.
+FIRST LETTER c
+--------------
 
-GLOBAL SYMBOLS BOARD
---------------------
+    c = first_letter_index
 
-Symbols are language-independent structural signals.
+c is CONSTANT for the token.
 
-The tokenizer recognizes symbols but does not assign
-semantic intent to them.
+It is NOT:
+
+    c % A
+
+K
+-
+
+K is NOT applied here.
+
+K belongs to full-text placement and MemoryGrid.
+
+GSP START ROW
+-------------
+
+The canonical GSP start-row formula remains in keyboard.py:
+
+    start_row = ((Lsum + Ssum - 1) % R) + 1
+
+PERTURBATION
+------------
+
+Full-text perturbation belongs to the GSP/MemoryGrid layer.
+
+Configured values:
+
+    forward_d  = 5
+    backward_d = 1
+
+The tokenizer does not apply these perturbations.
 """
 
 from __future__ import annotations
 
 import re
-
 from typing import Any
+
+import keyboard
 
 
 # =====================================================================
@@ -161,47 +168,37 @@ TH_KEY_LINE = (
 # =====================================================================
 
 KEY_LINES: dict[str, str] = {
-
     "en": EN_KEY_LINE,
     "fr": FR_KEY_LINE,
     "de": DE_KEY_LINE,
-
     "ar": AR_KEY_LINE,
     "he": HE_KEY_LINE,
     "el": EL_KEY_LINE,
-
     "ru": RU_KEY_LINE,
     "uk": UK_KEY_LINE,
-
     "hi": HI_KEY_LINE,
     "bn": BN_KEY_LINE,
-
     "ja": JA_HIRAGANA_KEY_LINE,
     "ko": KO_HANGUL_KEY_LINE,
-
     "zh": ZH_PINYIN_KEY_LINE,
-
     "tr": TR_KEY_LINE,
     "es": ES_KEY_LINE,
     "it": IT_KEY_LINE,
     "pt": PT_KEY_LINE,
-
     "nl": NL_KEY_LINE,
     "pl": PL_KEY_LINE,
     "cs": CS_KEY_LINE,
-
     "sv": SV_KEY_LINE,
     "no": NO_KEY_LINE,
     "da": DA_KEY_LINE,
     "fi": FI_KEY_LINE,
-
     "vi": VI_KEY_LINE,
     "th": TH_KEY_LINE,
 }
 
 
 # =====================================================================
-# MULTILINGUAL ALPHABETS
+# LANGUAGE ALPHABETS
 # =====================================================================
 
 ALPHABETS: dict[str, str] = {
@@ -210,10 +207,7 @@ ALPHABETS: dict[str, str] = {
     "en": "abcdefghijklmnopqrstuvwxyz",
 
     # 2 French
-    "fr": (
-        "abcdefghijklmnopqrstuvwxyz"
-        "àâäæçéèêëïîôœùûüÿ"
-    ),
+    "fr": "abcdefghijklmnopqrstuvwxyzàâäæçéèêëïîôœùûüÿ",
 
     # 3 German
     "de": "abcdefghijklmnopqrstuvwxyzäöüß",
@@ -227,8 +221,7 @@ ALPHABETS: dict[str, str] = {
     # 6 Arabic
     "ar": "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئىة",
 
-    # 7 Chinese
-    # Pinyin Latin indexing layer.
+    # 7 Chinese / Pinyin
     "zh": "abcdefghijklmnopqrstuvwxyz",
 
     # 8 Hindi
@@ -261,8 +254,7 @@ ALPHABETS: dict[str, str] = {
     # 15 Italian
     "it": "abcdefghijklmnopqrstuvwxyzàèéìíîòóùú",
 
-    # Additional multilingual alphabets.
-
+    # Additional language alphabets
     "he": "אבגדהוזחטיכלמנסעפצקרשתךםןףץ",
 
     "el": "αβγδεζηθικλμνξοπρστυφχψω",
@@ -292,12 +284,9 @@ ALPHABETS: dict[str, str] = {
     ),
 
     "ko": (
-        "ㅂㅈㄷㄱㅅ"
-        "ㅛㅕㅑㅐㅔ"
-        "ㅁㄴㅇㄹㅎ"
-        "ㅗㅓㅏㅣ"
-        "ㅋㅌㅊㅍ"
-        "ㅠㅜㅡ"
+        "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ"
+        "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ"
+        "ㅋㅌㅊㅍㅠㅜㅡ"
     ),
 
     "th": (
@@ -328,7 +317,6 @@ ALPHABETS: dict[str, str] = {
 # =====================================================================
 
 ALPHABETS["default"] = "abcdefghijklmnopqrstuvwxyz"
-
 KEY_LINES["default"] = EN_KEY_LINE
 
 
@@ -414,6 +402,19 @@ LANG_ALIASES = {
 
 
 # =====================================================================
+# GRID CONSTANTS
+# =====================================================================
+
+LETTER_GRID_R = 1
+WORD_GRID_R = 26
+
+# Full-text perturbation configuration.
+# These are consumed by the full-text/GSP memory layer.
+FORWARD_D = 5
+BACKWARD_D = 1
+
+
+# =====================================================================
 # STEM PREFIXES / SUFFIXES
 # =====================================================================
 
@@ -488,7 +489,6 @@ _FOLD = str.maketrans({
     "ü": "u",
 
     "ÿ": "y",
-
     "ñ": "n",
 
     "ş": "s",
@@ -764,12 +764,6 @@ GLOBAL_SYMBOL_INDEX = _build_symbol_index()
 def recognize_global_symbols(
     text: str,
 ) -> list[dict[str, Any]]:
-    """
-    Recognize symbols appearing in text.
-
-    Structural recognition only.
-    No semantic interpretation is performed here.
-    """
 
     if not text:
         return []
@@ -855,7 +849,15 @@ def grid_dims(
 ) -> dict[str, int]:
 
     """
-    Letter grid A×1, word grid A×A.
+    Return language alphabet size and grid definitions.
+
+    The grid dimensions are linguistic dimensions.
+
+    Letter:
+        A × 1
+
+    Word:
+        A × A
     """
 
     A = len(
@@ -892,7 +894,6 @@ def stem_token(
         if ch.isalnum() or ch in alpha
     )
 
-    # No English affix stemming for these scripts.
     if lang in {
         "ar",
         "hi",
@@ -951,10 +952,10 @@ def stem_token(
 
 
 # =====================================================================
-# LETTER INDEX
+# ALPHABET INDEX
 # =====================================================================
 
-def letter_index(
+def alphabet_index(
     ch: str,
     lang: str = "en",
 ) -> int | None:
@@ -970,7 +971,6 @@ def letter_index(
     if ch in alpha:
         return alpha.index(ch)
 
-    # Accent/code-mix bridge.
     folded = ch.translate(
         _FOLD
     )
@@ -992,6 +992,102 @@ def letter_index(
 
 
 # =====================================================================
+# LETTER INDEX
+# =====================================================================
+
+def letter_index(
+    ch: str,
+    lang: str = "en",
+) -> int | None:
+
+    """
+    Return the letter-grid placement index.
+
+    LETTER GRID RULE:
+
+        raw alphabet index % R
+
+    where:
+
+        R = 1
+
+    Therefore every valid alphabet character maps
+    into the single-row letter placement range.
+
+    This does NOT use c.
+    This does NOT use K.
+    """
+
+    index = alphabet_index(
+        ch,
+        lang,
+    )
+
+    if index is None:
+        return None
+
+    return index % LETTER_GRID_R
+
+
+# =====================================================================
+# RAW LETTER INDEX
+# =====================================================================
+
+def raw_letter_index(
+    ch: str,
+    lang: str = "en",
+) -> int | None:
+
+    """
+    Return the unreduced alphabet index.
+
+    This is useful when a higher layer needs the actual
+    alphabet position, particularly for c.
+    """
+
+    return alphabet_index(
+        ch,
+        lang,
+    )
+
+
+# =====================================================================
+# FIRST LETTER c
+# =====================================================================
+
+def first_letter_index(
+    word: str,
+    lang: str = "en",
+) -> int:
+
+    """
+    Return c.
+
+    c is ALWAYS the first-letter alphabet index.
+
+    IMPORTANT:
+
+        c is NOT modulo A.
+        c is NOT modulo R.
+
+    It remains the first-letter index itself.
+    """
+
+    if not word:
+        return 0
+
+    index = alphabet_index(
+        word[0],
+        lang,
+    )
+
+    if index is None:
+        return 0
+
+    return index
+
+
+# =====================================================================
 # LETTER CELLS
 # =====================================================================
 
@@ -1000,16 +1096,63 @@ def letter_cells(
     lang: str = "en",
 ) -> list[int]:
 
-    return [
-        i
-        for ch in token
-        if (
-            i := letter_index(
-                ch,
-                lang,
-            )
-        ) is not None
-    ]
+    """
+    Return letter-grid indices.
+
+    Letter placement uses:
+
+        alphabet_index % 1
+
+    No K is applied.
+    """
+
+    cells: list[int] = []
+
+    for ch in token:
+
+        index = letter_index(
+            ch,
+            lang,
+        )
+
+        if index is not None:
+            cells.append(index)
+
+    return cells
+
+
+# =====================================================================
+# WORD INDEX
+# =====================================================================
+
+def word_index(
+    token: str,
+    lang: str = "en",
+) -> int:
+
+    """
+    Return the word-grid row index.
+
+    WORD GRID RULE:
+
+        word_index % 26
+
+    The word index is based on stem length.
+
+    No K is applied.
+    """
+
+    stem = stem_token(
+        token,
+        lang,
+    )
+
+    L = max(
+        len(stem),
+        1,
+    )
+
+    return L % WORD_GRID_R
 
 
 # =====================================================================
@@ -1022,22 +1165,29 @@ def word_cell(
 ) -> dict[str, int]:
 
     """
-    Word grid A×A.
+    Word-grid representation.
 
-    FORMULA — PRESERVED:
+    PRESERVED CORE FORMULA:
 
-        A      = alphabet length
         L      = len(stem)
         uID    = L
         word_S = L
 
-        C      = first_letter_index
+    Word row:
 
-        col    = C
-        row    = (L + L) % A
+        L + L
 
-    C is always the first-letter index.
-    It is not recalculated from word length.
+    reduced by:
+
+        R = 26
+
+    c:
+
+        first-letter alphabet index
+
+    c is NOT modulo-reduced.
+
+    K is NOT applied.
     """
 
     lang = normalize_lang(
@@ -1058,439 +1208,5 @@ def word_cell(
         alphabet_for(lang)
     )
 
-    # C is ALWAYS the first-letter index.
-    C = (
-        letter_index(
-            stem[0],
-            lang,
-        )
-        if stem
-        else 0
-    )
-
-    if C is None:
-        C = 0
-
-    return {
-        "L": L,
-        "uID": L,
-        "word_S": L,
-
-        # C is the first-letter index.
-        "C": C,
-
-        # Column is directly determined by C.
-        "col": C,
-
-        # Existing row formula remains unchanged.
-        "row": (L + L) % A,
-
-        "A": A,
-        "lang": lang,
-        "grid": f"{A}x{A}",
-    }
-
-
-# =====================================================================
-# TOKENIZE
-# =====================================================================
-
-def tokenize(
-    text: str,
-    lang: str = "en",
-) -> list[dict[str, Any]]:
-
-    lang = normalize_lang(
-        lang
-    )
-
-    raw = re.sub(
-        r"\s+",
-        " ",
-        (text or "").strip().lower(),
-    )
-
-    if not raw:
-        return []
-
-    out: list[
-        dict[str, Any]
-    ] = []
-
-    for part in raw.split(" "):
-
-        if not part:
-            continue
-
-        stem = stem_token(
-            part,
-            lang,
-        )
-
-        out.append({
-
-            "original": part,
-
-            "stem": stem,
-
-            "lang": lang,
-
-            "letter": letter_cells(
-                stem,
-                lang,
-            ),
-
-            "word": word_cell(
-                stem,
-                lang,
-            ),
-
-        })
-
-    return out
-
-
-# =====================================================================
-# LETTER SCORE
-# =====================================================================
-
-def letter_score(
-    query_tokens: list[dict],
-    doc_text: str,
-    lang: str = "en",
-) -> float:
-
-    lang = normalize_lang(
-        lang
-    )
-
-    doc_toks = tokenize(
-        doc_text,
-        lang,
-    )
-
-    if (
-        not query_tokens
-        or not doc_toks
-    ):
-        return 0.0
-
-    score = 0.0
-
-    for qt in query_tokens:
-
-        q_letters = (
-            qt.get("letter")
-            or []
-        )
-
-        if not q_letters:
-            continue
-
-        for dt in doc_toks:
-
-            d_letters = (
-                dt.get("letter")
-                or []
-            )
-
-            i = 0
-            j = 0
-            matches = 0
-
-            while (
-                i < len(q_letters)
-                and j < len(d_letters)
-            ):
-
-                if ( not query_tokens
-        or not doc_toks
-    ):
-        return 0.0
-
-    score = 0.0
-
-    for qt in query_tokens:
-
-        q_letters = (
-            qt.get("letter")
-            or []
-        )
-
-        if not q_letters:
-            continue
-
-        for dt in doc_toks:
-
-            d_letters = (
-                dt.get("letter")
-                or []
-            )
-
-            i = 0
-            j = 0
-            matches = 0
-
-            while (
-                i < len(q_letters)
-                and j < len(d_letters)
-            ):
-
-                if (
-                    q_letters[i]
-                    == d_letters[j]
-                ):
-
-                    matches += 1
-                    i += 1
-
-                j += 1
-
-            score += (
-                matches
-                / max(
-                    len(q_letters),
-                    1,
-                )
-            ) * 10
-
-    return score
-
-
-# =====================================================================
-# WORD SCORE
-# =====================================================================
-
-def word_score(
-    query_tokens: list[dict],
-    doc_text: str,
-    lang: str = "en",
-) -> float:
-
-    lang = normalize_lang(
-        lang
-    )
-
-    doc_toks = tokenize(
-        doc_text,
-        lang,
-    )
-
-    if (
-        not query_tokens
-        or not doc_toks
-    ):
-        return 0.0
-
-    score = 0.0
-
-    doc_cells = {
-        (
-            t["word"]["C"],
-            t["word"]["row"],
-            t["stem"],
-        )
-        for t in doc_toks
-    }
-
-    for qt in query_tokens:
-
-        w = qt["word"]
-        stem = qt["stem"]
-
-        for (
-            C,
-            row,
-            d_stem,
-        ) in doc_cells:
-
-            if stem == d_stem:
-
-                score += 25
-
-            elif (
-                w["C"] == C
-                and w["row"] == row
-            ):
-
-                score += 15
-
-            elif (
-                w["C"] == C
-                or w["row"] == row
-            ):
-
-                score += 5
-
-    return score
-
-
-# =====================================================================
-# SUPPORTED LANGUAGES
-# =====================================================================
-
-def supported_languages() -> list[dict[str, Any]]:
-
-    out = []
-
-    for code, alpha in ALPHABETS.items():
-
-        if code == "default":
-            continue
-
-        A = len(alpha)
-
-        out.append({
-
-            "code": code,
-
-            "A": A,
-
-            "letter_grid": f"{A}x1",
-
-            "word_grid": f"{A}x{A}",
-
-            "key_line": KEY_LINES.get(
-                code,
-                KEY_LINES["default"],
-            ),
-
-        })
-
-    return out
-
-
-# =====================================================================
-# LANGUAGE KEY MAPPING
-# =====================================================================
-
-def language_key_mapping(
-    lang: str | None,
-) -> dict[str, Any]:
-
-    code = normalize_lang(
-        lang
-    )
-
-    alpha = alphabet_for(
-        code
-    )
-
-    key_line = key_line_for(
-        code
-    )
-
-    return {
-
-        "code": code,
-
-        "alphabet": alpha,
-
-        "key_line": key_line,
-
-        "A": len(alpha),
-
-        "letter_grid": f"{len(alpha)}x1",
-
-        "word_grid": f"{len(alpha)}x{len(alpha)}",
-
-    }
-
-
-# =====================================================================
-# GLOBAL SYMBOL BOARD ACCESS
-# =====================================================================
-
-def global_symbols_board() -> dict[str, tuple[str, ...]]:
-
-    """
-    Return the global symbol categories.
-
-    A copy is returned so consumers cannot mutate
-    the canonical board.
-    """
-
-    return {
-        category: tuple(symbols)
-        for category, symbols
-        in GLOBAL_SYMBOLS_BOARD.items()
-    }
-
-
-# =====================================================================
-# TEST / DEVELOPMENT
-# =====================================================================
-
-if __name__ == "__main__":
-
-    print(
-        "English mapping:"
-    )
-
-    print(
-        language_key_mapping(
-            "en"
-        )
-    )
-
-    print(
-        "\nArabic mapping:"
-    )
-
-    print(
-        language_key_mapping(
-            "ar"
-        )
-    )
-
-    print(
-        "\nChinese mapping:"
-    )
-
-    print(
-        language_key_mapping(
-            "zh"
-        )
-    )
-
-    print(
-        "\nYoruba mapping:"
-    )
-
-    print(
-        language_key_mapping(
-            "yo"
-        )
-    )
-
-    print(
-        "\nWord cell:"
-    )
-
-    print(
-        word_cell(
-            "deterministic",
-            "en",
-        )
-    )
-
-    print(
-        "\nSymbols:"
-    )
-
-    print(
-        recognize_global_symbols(
-            "Can GSP calculate x >= 10%?"
-        )
-    )
-
-    print(
-        "\nSupported languages:"
-    )
-
-    for language in supported_languages():
-
-        print(
-            language
-        )
-           
+    c = first_letter_index(
+     
