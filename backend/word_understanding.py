@@ -997,7 +997,4 @@ class WordUnderstanding:
 
             "language": lang,
 
-            "country" : country,
-
-            "state" : state,
         }
