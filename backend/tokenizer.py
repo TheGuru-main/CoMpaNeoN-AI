@@ -1154,4 +1154,307 @@ def tokenize(
 
 # =====================================================================
 # LETTER SCORE
-# ======================================================
+# ======================================================================================================
+
+def letter_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+
+    lang = normalize_lang(
+        lang
+    )
+
+    doc_toks = tokenize(
+        doc_text,
+        lang,
+    )
+
+    if (
+        not query_tokens
+        or not doc_toks
+    ):
+        return 0.0
+
+    score = 0.0
+
+    for qt in query_tokens:
+
+        q_letters = (
+            qt.get("letter")
+            or []
+        )
+
+        if not q_letters:
+            continue
+
+        for dt in doc_toks:
+
+            d_letters = (
+                dt.get("letter")
+                or []
+            )
+
+            i = 0
+            j = 0
+            matches = 0
+
+            while (
+                i < len(q_letters)
+                and j < len(d_letters)
+            ):
+
+                if (
+                    q_letters[i]
+                    == d_letters[j]
+                ):
+
+                    matches += 1
+                    i += 1
+
+                j += 1
+
+            score += (
+                matches
+                / max(
+                    len(q_letters),
+                    1,
+                )
+            ) * 10
+
+    return score
+
+
+# =====================================================================
+# WORD SCORE
+# =====================================================================
+
+def word_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+
+    lang = normalize_lang(
+        lang
+    )
+
+    doc_toks = tokenize(
+        doc_text,
+        lang,
+    )
+
+    if (
+        not query_tokens
+        or not doc_toks
+    ):
+        return 0.0
+
+    score = 0.0
+
+    doc_cells = {
+        (
+            t["word"]["col"],
+            t["word"]["row"],
+            t["stem"],
+        )
+        for t in doc_toks
+    }
+
+    for qt in query_tokens:
+
+        w = qt["word"]
+        stem = qt["stem"]
+
+        for (
+            col,
+            row,
+            d_stem,
+        ) in doc_cells:
+
+            if stem == d_stem:
+
+                score += 25
+
+            elif (
+                w["col"] == col
+                and w["row"] == row
+            ):
+
+                score += 15
+
+            elif w["col"] == col or w["row"] == row:
+
+                score += 5
+
+    return score
+
+
+# =====================================================================
+# SUPPORTED LANGUAGES
+# =====================================================================
+
+def supported_languages() -> list[dict[str, Any]]:
+
+    out = []
+
+    for code, alpha in ALPHABETS.items():
+
+        if code == "default":
+            continue
+
+        A = len(alpha)
+
+        out.append({
+
+            "code": code,
+
+            "A": A,
+
+            "letter_grid": f"{A}x1",
+
+            "word_grid": f"{A}x{A}",
+
+            "key_line": KEY_LINES.get(
+                code,
+                KEY_LINES["default"],
+            ),
+
+        })
+
+    return out
+
+
+# =====================================================================
+# LANGUAGE KEY MAPPING
+# =====================================================================
+
+def language_key_mapping(
+    lang: str | None,
+) -> dict[str, Any]:
+
+    code = normalize_lang(
+        lang
+    )
+
+    alpha = alphabet_for(
+        code
+    )
+
+    key_line = key_line_for(
+        code
+    )
+
+    return {
+
+        "code": code,
+
+        "alphabet": alpha,
+
+        "key_line": key_line,
+
+        "A": len(alpha),
+
+        "letter_grid": f"{len(alpha)}x1",
+
+        "word_grid": f"{len(alpha)}x{len(alpha)}",
+
+    }
+
+
+# =====================================================================
+# GLOBAL SYMBOL BOARD ACCESS
+# =====================================================================
+
+def global_symbols_board() -> dict[str, tuple[str, ...]]:
+
+    """
+    Return the global symbol categories.
+
+    A copy is returned so consumers do not mutate the canonical board.
+    """
+
+    return {
+        category: tuple(symbols)
+        for category, symbols
+        in GLOBAL_SYMBOLS_BOARD.items()
+    }
+
+
+# =====================================================================
+# TEST / DEVELOPMENT
+# =====================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "English mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "en"
+        )
+    )
+
+    print(
+        "\nArabic mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "ar"
+        )
+    )
+
+    print(
+        "\nChinese mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "zh"
+        )
+    )
+
+    print(
+        "\nYoruba mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "yo"
+        )
+    )
+
+    print(
+        "\nWord cell:"
+    )
+
+    print(
+        word_cell(
+            "deterministic",
+            "en",
+        )
+    )
+
+    print(
+        "\nSymbols:"
+    )
+
+    print(
+        recognize_global_symbols(
+            "Can GSP calculate x >= 10%?"
+        )
+    )
+
+    print(
+        "\nSupported languages:"
+    )
+
+    for language in supported_languages():
+
+        print(
+            language
+        )
