@@ -1208,5 +1208,558 @@ def word_cell(
         alphabet_for(lang)
     )
 
+    c = first_letter_index( stem,
+        lang,
+    )
+
+    # The established word formula.
+    raw_word_row = L + L
+
+    row = (
+        raw_word_row
+        % WORD_GRID_R
+    )
+
+    return {
+        "L": L,
+        "uID": L,
+        "word_S": L,
+
+        # c is constant and not modulo-reduced.
+        "c": c,
+
+        # Word-grid column is the first-letter index.
+        "col": c,
+
+        # Word-grid row uses R = 26.
+        "row": row,
+
+        "A": A,
+        "R": WORD_GRID_R,
+        "lang": lang,
+
+        "grid": f"{A}x{A}",
+    }
+
+
+# =====================================================================
+# GSP INPUT VALUES
+# =====================================================================
+
+def gsp_inputs(
+    token: str,
+    lang: str = "en",
+) -> dict[str, int]:
+
+    """
+    Obtain the GSP-derived values from keyboard.py.
+
+    This function does not calculate the GSP formula itself.
+
+    keyboard.py owns:
+
+        Lsum
+        Ssum
+        first-letter keyboard column
+        start_row formula
+    """
+
+    lang = normalize_lang(
+        lang
+    )
+
+    stem = stem_token(
+        token,
+        lang,
+    )
+
+    Lsum = keyboard.calculate_lsum(
+        stem,
+        lang,
+    )
+
+    Ssum = keyboard.calculate_ssum(
+        stem,
+        lang,
+    )
+
     c = first_letter_index(
+        stem,
+        lang,
+    )
+
+    return {
+        "Lsum": Lsum,
+        "Ssum": Ssum,
+        "c": c,
+    }
+
+
+# =====================================================================
+# GSP START ROW
+# =====================================================================
+
+def gsp_start_row(
+    token: str,
+    lang: str = "en",
+    R: int = 64,
+) -> int:
+
+    """
+    Delegate start-row calculation to keyboard.py.
+
+    Canonical formula remains:
+
+        ((Lsum + Ssum - 1) % R) + 1
+    """
+
+    values = gsp_inputs(
+        token,
+        lang,
+    )
+
+    return (
+        (values["Lsum"] + values["Ssum"] - 1)
+        % R
+    ) + 1
+
+
+# =====================================================================
+# TOKENIZE
+# =====================================================================
+
+def tokenize(
+    text: str,
+    lang: str = "en",
+) -> list[dict[str, Any]]:
+
+    lang = normalize_lang(
+        lang
+    )
+
+    raw = re.sub(
+        r"\s+",
+        " ",
+        (text or "").strip().lower(),
+    )
+
+    if not raw:
+        return []
+
+    out: list[
+        dict[str, Any]
+    ] = []
+
+    for part in raw.split(" "):
+
+        if not part:
+            continue
+
+        stem = stem_token(
+            part,
+            lang,
+        )
+
+        out.append({
+
+            "original": part,
+
+            "stem": stem,
+
+            "lang": lang,
+
+            "letter": letter_cells(
+                stem,
+                lang,
+            ),
+
+            "word": word_cell(
+                stem,
+                lang,
+            ),
+
+            "symbols": recognize_global_symbols(
+                part
+            ),
+
+        })
+
+    return out
+
+
+# =====================================================================
+# LETTER SCORE
+# =====================================================================
+
+def letter_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+
+    lang = normalize_lang(
+        lang
+    )
+
+    doc_toks = tokenize(
+        doc_text,
+        lang,
+    )
+
+    if (
+        not query_tokens
+        or not doc_toks
+    ):
+        return 0.0
+
+    score = 0.0
+
+    for qt in query_tokens:
+
+        q_letters = (
+            qt.get("letter")
+            or []
+        )
+
+        if not q_letters:
+            continue
+
+        for dt in doc_toks:
+
+            d_letters = (
+                dt.get("letter")
+                or []
+            )
+
+            i = 0
+            j = 0
+            matches = 0
+
+            while (
+                i < len(q_letters)
+                and j < len(d_letters)
+            ):
+
+                if (
+                    q_letters[i]
+                    == d_letters[j]
+                ):
+
+                    matches += 1
+                    i += 1
+
+                j += 1
+
+            score += (
+                matches
+                / max(
+                    len(q_letters),
+                    1,
+                )
+            ) * 10
+
+    return score
+
+
+# =====================================================================
+# WORD SCORE
+# =====================================================================
+
+def word_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+
+    lang = normalize_lang(
+        lang
+    )
+
+    doc_toks = tokenize(
+        doc_text,
+        lang,
+    )
+
+    if (
+        not query_tokens
+        or not doc_toks
+    ):
+        return 0.0
+
+    score = 0.0
+
+    doc_cells = {
+        (
+            t["word"]["col"],
+            t["word"]["row"],
+            t["stem"],
+        )
+        for t in doc_toks
+    }
+
+    for qt in query_tokens:
+
+        w = qt["word"]
+        stem = qt["stem"]
+
+        for (
+            col,
+            row,
+            d_stem,
+        ) in doc_cells:
+
+            if stem == d_stem:
+
+                score += 25
+
+            elif (
+                w["col"] == col
+                and w["row"] == row
+            ):
+
+                score += 15
+
+            elif (
+                w["col"] == col
+                or w["row"] == row
+            ):
+
+                score += 5
+
+    return score
+
+
+# =====================================================================
+# SUPPORTED LANGUAGES
+# =====================================================================
+
+def supported_languages() -> list[dict[str, Any]]:
+
+    out = []
+
+    for code, alpha in ALPHABETS.items():
+
+        if code == "default":
+            continue
+
+        A = len(alpha)
+
+        out.append({
+
+            "code": code,
+
+            "A": A,
+
+            "letter_grid": f"{A}x1",
+
+            "word_grid": f"{A}x{A}",
+
+            "key_line": KEY_LINES.get(
+                code,
+                KEY_LINES["default"],
+            ),
+
+        })
+
+    return out
+
+
+# =====================================================================
+# LANGUAGE KEY MAPPING
+# =====================================================================
+
+def language_key_mapping(
+    lang: str | None,
+) -> dict[str, Any]:
+
+    code = normalize_lang(
+        lang
+    )
+
+    alpha = alphabet_for(
+        code
+    )
+
+    key_line = key_line_for(
+        code
+    )
+
+    return {
+
+        "code": code,
+
+        "alphabet": alpha,
+
+        "key_line": key_line,
+
+        "A": len(alpha),
+
+        "letter_grid": f"{len(alpha)}x1",
+
+        "word_grid": (
+            f"{len(alpha)}x"
+            f"{len(alpha)}"
+        ),
+
+        "letter_R": LETTER_GRID_R,
+
+        "word_R": WORD_GRID_R,
+
+    }
+
+
+# =====================================================================
+# GLOBAL SYMBOL BOARD ACCESS
+# =====================================================================
+
+def global_symbols_board(
+) -> dict[str, tuple[str, ...]]:
+
+    return {
+        category: tuple(symbols)
+        for category, symbols
+        in GLOBAL_SYMBOLS_BOARD.items()
+    }
+
+
+
+# =====================================================================
+# TEST / DEVELOPMENT
+# =====================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "English mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "en"
+        )
+    )
+
+    print(
+        "\nArabic mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "ar"
+        )
+    )
+
+    print(
+        "\nChinese mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "zh"
+        )
+    )
+
+    print(
+        "\nYoruba mapping:"
+    )
+
+    print(
+        language_key_mapping(
+            "yo"
+        )
+    )
+
+    print(
+        "\nLetter index:"
+    )
+
+    print(
+        alphabet_index(
+            "A",
+            "en",
+        )
+    )
+
+    print(
+        "\nLetter placement:"
+    )
+
+    print(
+        letter_index(
+            "A",
+            "en",
+        )
+    )
+
+    print(
+        "\nFirst-letter c:"
+    )
+
+    print(
+        first_letter_index(
+            "apple",
+            "en",
+        )
+    )
+
+    print(
+        "\nWord cell:"
+    )
+
+    print(
+        word_cell(
+            "deterministic",
+            "en",
+        )
+    )
+
+    print(
+        "\nGSP inputs:"
+    )
+
+    print(
+        gsp_inputs(
+            "deterministic",
+            "en",
+        )
+    )
+
+    print(
+        "\nGSP start row:"
+    )
+
+    print(
+        gsp_start_row(
+            "deterministic",
+            "en",
+        )
+    )
+
+    print(
+        "\nSymbols:"
+    )
+
+    print(
+        recognize_global_symbols(
+            "Can GSP calculate x >= 10%?"
+        )
+    )
+
+    print(
+        "\nFull-text placement config:"
+    )
+
+    print(
+        full_text_placement_config()
+    )
+
+    print(
+        "\nSupported languages:"
+    )
+
+    for language in supported_languages():
+
+        print(
+            language
+        )
      
