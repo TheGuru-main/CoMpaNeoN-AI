@@ -1,11 +1,124 @@
+"""
+CoMpaNeoN Memory Grid
+=====================
+
+Knowledge Memory Grid for CoMpaNeoN.
+
+Architecture
+------------
+
+MemoryGrid maintains three independent memory routes:
+
+    ROUTE 1 — LETTER GRID
+        Language alphabet × 1
+
+    ROUTE 2 — WORD GRID
+        Language alphabet × alphabet
+
+    ROUTE 3 — FULL-TEXT / STORAGE GRID
+        Independent 64-row GSP storage dimension
+
+Responsibilities
+----------------
+
+MemoryGrid:
+
+    - stores tokenized knowledge
+    - stores complete documents
+    - indexes letters
+    - indexes complete words
+    - places complete text into the independent GSP storage grid
+    - retrieves candidates through independent routes
+
+MemoryGrid does NOT:
+
+    - define alphabets
+    - tokenize text
+    - calculate letter indices
+    - calculate word-grid coordinates
+    - perform crawler perturbation
+    - perform GSP K replication
+    - perform GSP D movement
+    - rank results
+    - generate prompts
+    - generate AI responses
+
+Dependencies
+------------
+
+tokenizer.py
+    Owns linguistic representation:
+
+        tokenize()
+        normalize_lang()
+
+    Token records provide:
+
+        letter
+        word
+        stem
+        language
+
+keyboard.py
+    Owns full-text GSP calculation:
+
+        calculate_lsum()
+        calculate_ssum()
+        first_letter_index()
+        gsp_place()
+
+    MemoryGrid uses only the GSP start-row result.
+
+IMPORTANT GSP RULE
+------------------
+
+For full-text storage:
+
+    L = calculate_lsum(text)
+    S = calculate_ssum(text)
+    c = first_letter_index(text)
+    R = 64
+
+    start_row = ((L + S - 1) % R) + 1
+
+The value of c is preserved directly.
+
+MemoryGrid does NOT calculate:
+
+    c % 26
+
+K and D
+-------
+
+K and D do NOT belong to MemoryGrid placement.
+
+They belong to crawler/grid-crawler movement and perturbation.
+
+Therefore MemoryGrid performs exactly one GSP storage placement:
+
+    full text -> start_row
+
+No replica sequence is generated here.
+No forward D is generated here.
+No backward D is generated here.
+
+The three routes are unified only during retrieval/ranking.
+"""
+
+
 from __future__ import annotations
+
 
 from typing import (
     List,
     Dict,
     Any,
-    Iterable,
 )
+
+
+# =====================================================================
+# TOKENIZER
+# =====================================================================
 
 from tokenizer import (
     tokenize,
@@ -13,86 +126,54 @@ from tokenizer import (
 )
 
 
+# =====================================================================
+# GSP / KEYBOARD
+# =====================================================================
+
+from keyboard import (
+    calculate_lsum,
+    calculate_ssum,
+    first_letter_index,
+    gsp_place,
+)
+
+
+# =====================================================================
+# MEMORY GRID
+# =====================================================================
+
 class MemoryGrid:
     """
     CoMpaNeoN Knowledge Memory Grid.
 
     Knowledge may come from:
+
         - user entries
         - crawled documents
         - background training
         - dictionary/domain knowledge
         - research material
-        - other indexed sources
+        - indexed project knowledge
+        - other approved knowledge sources
 
-    Every entry uses the same three independent memory routes:
+    Every entry is represented through three independent routes:
 
-    ---------------------------------------------------------------
-    ROUTE 1 — LETTER GRID
-    ---------------------------------------------------------------
+        1. Letter Grid
+        2. Word Grid
+        3. Full-text / Storage Grid
 
-        Language alphabet × 1
+    The routes remain independent.
 
-        Each letter token resolves directly to its alphabet index.
+    Tokenizer owns linguistic coordinates.
 
-        Example:
+    Keyboard/GSP owns full-text storage placement.
 
-            a -> 0
-            b -> 1
-            c -> 2
-            ...
-
-        The letter route does NOT calculate a row or word coordinate.
-
-    ---------------------------------------------------------------
-    ROUTE 2 — WORD GRID
-    ---------------------------------------------------------------
-
-        Language alphabet × alphabet
-
-        The complete word itself is resolved.
-
-        Word-grid rules:
-
-            L   = name/word length
-            uID = L
-            S   = L
-
-        Therefore:
-
-            S = L
-
-        The tokenizer resolves the word into its A×A word cell.
-
-        This route is independent of the 64-row storage route.
-
-    ---------------------------------------------------------------
-    ROUTE 3 — FULL-TEXT / STORAGE GRID
-    ---------------------------------------------------------------
-
-        Independent 64-row storage dimension.
-
-        This route is based on the length of words contained in
-        the indexed entry.
-
-        It does NOT use the Word Grid's A×A coordinate.
-
-        It does NOT treat the word-grid row as the storage row.
-
-        The 64-row storage dimension therefore remains independent
-        from the letter and word routes.
-
-    ---------------------------------------------------------------
-
-    The three routes are unified only during retrieval/ranking.
-
-    Storage placement and retrieval remain separate from lexical
-    word-grid placement.
+    MemoryGrid owns storage and retrieval.
     """
 
-    # ==================================================================
+    # =================================================================
     # INITIALIZATION
-    # ==================================================================
+    # =================================================================
 
     def __init__(
         self,
@@ -103,91 +184,108 @@ class MemoryGrid:
         Initialize the memory grid.
 
         rows:
-            Number of independent storage rows.
+            Independent full-text storage dimension.
+
+            Default:
+                64
 
         cols:
             Default alphabet/column dimension.
 
-        The default dimensions remain compatible with the established
-        26-letter English grid while tokenizer.py remains responsible
-        for language-specific alphabet dimensions.
+            This remains available for compatibility with the
+            established English 26-column architecture.
+
+        Language-specific alphabet dimensions remain owned by
+        tokenizer.py.
         """
 
         self.rows = int(rows)
+
         self.cols = int(cols)
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # ROUTE 1
-        # Letter Grid
+        # LETTER GRID
         #
-        # letter_index -> token records
-        # --------------------------------------------------------------
+        # alphabet index -> token records
+        # -------------------------------------------------------------
 
         self.letter_grid: Dict[
             int,
             List[Dict[str, Any]]
         ] = {}
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # ROUTE 2
-        # Word Grid
+        # WORD GRID
         #
         # (word_row, word_col) -> token records
         #
-        # The tokenizer supplies the language-specific A×A coordinate.
-        # --------------------------------------------------------------
+        # Coordinates are supplied by tokenizer.py.
+        # -------------------------------------------------------------
 
         self.word_grid: Dict[
-            tuple,
+            tuple[int, int],
             List[Dict[str, Any]]
         ] = {}
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # ROUTE 3
-        # Full-text / Storage Grid
+        # FULL-TEXT / STORAGE GRID
         #
-        # storage_row -> token records
+        # GSP start row -> document/token records
         #
-        # This is the independent 64-row dimension.
-        # --------------------------------------------------------------
+        # Independent 64-row storage dimension.
+        # -------------------------------------------------------------
 
         self.storage_grid: Dict[
             int,
             List[Dict[str, Any]]
         ] = {}
 
-        # --------------------------------------------------------------
-        # Complete document store
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
+        # COMPLETE DOCUMENT STORE
+        #
+        # Preserves complete original text.
+        # -------------------------------------------------------------
 
         self.doc_store: List[
             Dict[str, Any]
         ] = []
 
-    # ==================================================================
+    # =================================================================
     # ROUTE 1 — LETTER GRID
-    # ==================================================================
+    # =================================================================
 
     def _letter_cells(
         self,
         token_info: Dict[str, Any],
-    ) -> Iterable[int]:
+    ) -> List[int]:
         """
         Return the letter-grid positions belonging to a token.
 
-        tokenizer.py has already resolved each character into its
-        language-specific alphabet index.
+        tokenizer.py has already calculated the alphabet indices.
 
-        We preserve those mappings exactly.
+        MemoryGrid does not recalculate them.
 
-        No word-length calculation occurs here.
-        No 64-row calculation occurs here.
+        No storage row calculation occurs here.
+        No GSP calculation occurs here.
         """
 
-        return token_info.get(
+        cells = token_info.get(
             "letter",
             [],
-        ) or []
+        )
+
+        if not cells:
+            return []
+
+        return [
+            int(cell)
+            for cell in cells
+        ]
+
+    # -----------------------------------------------------------------
 
     def _place_letter(
         self,
@@ -195,27 +293,34 @@ class MemoryGrid:
         record: Dict[str, Any],
     ) -> None:
         """
-        Place a token record into one letter-grid cell.
+        Place a token record into one Letter Grid cell.
         """
 
-        cell = int(letter_index)
+        cell = int(
+            letter_index
+        )
 
         if cell not in self.letter_grid:
+
             self.letter_grid[cell] = []
 
         self.letter_grid[cell].append(
             record
         )
 
+    # -----------------------------------------------------------------
+
     def get_tokens_at_letter(
         self,
         letter_index: int,
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve token records from a letter-grid position.
+        Retrieve token records from a Letter Grid position.
         """
 
-        cell = int(letter_index)
+        cell = int(
+            letter_index
+        )
 
         return list(
             self.letter_grid.get(
@@ -224,9 +329,9 @@ class MemoryGrid:
             )
         )
 
-    # ==================================================================
+    # =================================================================
     # ROUTE 2 — WORD GRID
-    # ==================================================================
+    # =================================================================
 
     def _word_cell(
         self,
@@ -235,21 +340,24 @@ class MemoryGrid:
         """
         Return the A×A Word Grid coordinate supplied by tokenizer.py.
 
-        Established Word Grid rule:
+        tokenizer.py owns:
 
-            L   = word/name length
-            uID = L
-            S   = L
+            L
+            uID
+            word_S
+            c
+            col
+            row
+            A
 
-        tokenizer.py resolves that information into:
+        MemoryGrid simply consumes:
 
             word["row"]
             word["col"]
 
-        MemoryGrid does not replace that resolution with the 64-row
-        storage formula.
-
-        This separation is intentional.
+        No 64-row storage calculation occurs here.
+        No K occurs here.
+        No D occurs here.
         """
 
         word = token_info.get(
@@ -270,7 +378,12 @@ class MemoryGrid:
             )
         )
 
-        return row, col
+        return (
+            row,
+            col,
+        )
+
+    # -----------------------------------------------------------------
 
     def _place_word(
         self,
@@ -278,7 +391,8 @@ class MemoryGrid:
         record: Dict[str, Any],
     ) -> None:
         """
-        Place the complete word into its A×A Word Grid cell.
+        Place the complete word into its tokenizer-defined
+        A×A Word Grid cell.
         """
 
         row, col = self._word_cell(
@@ -291,11 +405,14 @@ class MemoryGrid:
         )
 
         if cell not in self.word_grid:
+
             self.word_grid[cell] = []
 
         self.word_grid[cell].append(
             record
         )
+
+    # -----------------------------------------------------------------
 
     def get_tokens_at_word(
         self,
@@ -318,91 +435,219 @@ class MemoryGrid:
             )
         )
 
-    # ==================================================================
+    # =================================================================
     # ROUTE 3 — FULL-TEXT / STORAGE GRID
-    # ==================================================================
+    # =================================================================
 
-    def _storage_cells(
+    def _storage_gsp(
         self,
-        token_info: Dict[str, Any],
-    ) -> List[int]:
+        text: str,
+        lang: str = "en",
+    ) -> Dict[str, int]:
         """
-        Resolve the independent 64-row storage position.
+        Calculate the full-text GSP storage coordinates.
 
-        The storage route is based on the length of the word contained
-        in the indexed entry.
+        keyboard.py owns the GSP calculation.
+
+        This method intentionally does NOT reproduce the formulas.
+
+        It calls:
+
+            calculate_lsum()
+            calculate_ssum()
+            first_letter_index()
+            gsp_place()
+
+        The resulting start row is the storage coordinate.
 
         IMPORTANT:
 
-            This is NOT the Word Grid.
+            c is preserved directly.
 
-            Word Grid:
-                A × A
-                L = name length
-                uID = L
-                S = L
+            No:
 
-            Storage:
-                independent 64-row dimension
+                c % 26
 
-        The storage row is therefore calculated independently from the
-        tokenizer's A×A word coordinate.
+            is performed.
+
+        IMPORTANT:
+
+            K is not supplied.
+
+            D is not supplied.
+
+            C is not supplied.
+
+            MemoryGrid needs only the GSP start row for storage.
+
+        The canonical row dimension is:
+
+            R = self.rows
+
+        Default:
+
+            R = 64
         """
 
-        word = token_info.get(
-            "original",
-            "",
+        if not text:
+
+            return {
+                "L": 0,
+                "S": 0,
+                "c": 0,
+                "R": self.rows,
+                "start_row": 0,
+            }
+
+        # -------------------------------------------------------------
+        # Full-text GSP inputs
+        # -------------------------------------------------------------
+
+        Lsum = calculate_lsum(
+            text,
+            lang,
         )
 
-        if not word:
+        Ssum = calculate_ssum(
+            text,
+            lang,
+        )
+
+        c = first_letter_index(
+            text,
+            lang,
+        )
+
+        # -------------------------------------------------------------
+        # Main GSP placement
+        #
+        # keyboard.py owns:
+        #
+        #     start_row = ((L + S - 1) % R) + 1
+        #
+        # We deliberately do not reproduce it here.
+        # -------------------------------------------------------------
+
+        placement = gsp_place(
+            Lsum,
+            Ssum,
+            c,
+            R=self.rows,
+        )
+
+        return {
+            "L": int(Lsum),
+            "S": int(Ssum),
+            "c": int(c),
+            "R": self.rows,
+            "start_row": int(
+                placement.get(
+                    "start_row",
+                    0,
+                )
+            ),
+        }
+
+    # -----------------------------------------------------------------
+
+    def _storage_cells(
+        self,
+        text: str,
+        lang: str = "en",
+    ) -> List[int]:
+        """
+        Resolve the independent full-text storage cell.
+
+        Exactly one primary GSP start row is returned.
+
+        There is no K sequence.
+
+        There is no D movement.
+
+        There is no forward perturbation.
+
+        There is no backward perturbation.
+        """
+
+        if not text:
+
             return []
 
-        length = len(
-            word
+        gsp = self._storage_gsp(
+            text,
+            lang,
         )
 
-        row = (
-            length
-            % self.rows
+        start_row = int(
+            gsp.get(
+                "start_row",
+                0,
+            )
         )
 
-        return [row]
+        if start_row <= 0:
+
+            return []
+
+        return [
+            start_row
+        ]
+
+    # -----------------------------------------------------------------
 
     def _place_storage(
         self,
-        token_info: Dict[str, Any],
+        text: str,
+        lang: str,
         record: Dict[str, Any],
     ) -> None:
         """
-        Place a token into the independent storage route.
+        Place complete-text knowledge into the independent
+        64-row GSP storage grid.
         """
 
         storage_rows = self._storage_cells(
-            token_info
+            text,
+            lang,
         )
 
         for row in storage_rows:
 
             if row not in self.storage_grid:
+
                 self.storage_grid[row] = []
 
             self.storage_grid[row].append(
                 record
             )
 
+    # -----------------------------------------------------------------
+
     def get_tokens_at_storage(
         self,
         row: int,
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve token records from the independent 64-row storage
-        dimension.
+        Retrieve records from the independent GSP storage row.
+
+        Storage rows are normalized against the configured storage
+        dimension for compatibility.
+
+        The stored GSP start row itself remains 1-based.
         """
 
-        normalized_row = (
-            int(row)
-            % self.rows
-        )
+        normalized_row = int(row)
+
+        if normalized_row <= 0:
+
+            return []
+
+        if normalized_row > self.rows:
+
+            normalized_row = (
+                ((normalized_row - 1) % self.rows)
+                + 1
+            )
 
         return list(
             self.storage_grid.get(
@@ -411,9 +656,9 @@ class MemoryGrid:
             )
         )
 
-    # ==================================================================
+    # =================================================================
     # DOCUMENT INSERTION
-    # ==================================================================
+    # =================================================================
 
     def add_document(
         self,
@@ -424,109 +669,172 @@ class MemoryGrid:
         """
         Add an entry to CoMpaNeoN memory.
 
-        The source is intentionally generic.
+        The text is first passed through tokenizer.py.
 
-        Therefore this method can index:
-
-            user entries
-            crawled content
-            background-training material
-            dictionary knowledge
-            research
-            domain knowledge
-            other indexed sources
-
-        Every token enters the three independent routes:
+        Every token enters:
 
             1. Letter Grid
             2. Word Grid
-            3. 64-row Storage Grid
 
-        The routes are not collapsed into one coordinate system.
+        The complete original document enters:
+
+            3. Full-text GSP Storage Grid
+
+        This distinction is important.
+
+        Token-level linguistic placement and complete-text storage
+        placement are separate operations.
+
+        GSP storage placement uses the complete text.
+
+        It does not calculate a storage row independently for every
+        token.
         """
 
         lang = normalize_lang(
             lang
         )
 
+        # -------------------------------------------------------------
+        # TOKENIZATION
+        # -------------------------------------------------------------
+
         tokens = tokenize(
             text,
             lang,
         )
 
+        # -------------------------------------------------------------
+        # DOCUMENT ID
+        # -------------------------------------------------------------
+
         doc_id = len(
             self.doc_store
         )
 
+        # -------------------------------------------------------------
+        # DOCUMENT STORE
+        #
+        # Preserve complete original knowledge.
+        # -------------------------------------------------------------
+
         self.doc_store.append({
+
             "text": text,
+
             "source": source,
+
             "lang": lang,
+
             "tokens": tokens,
+
         })
+
+        # -------------------------------------------------------------
+        # TOKEN ROUTES
+        # -------------------------------------------------------------
 
         for token in tokens:
 
             record = {
+
                 "doc_id": doc_id,
+
                 "original": token.get(
                     "original",
                     "",
                 ),
+
                 "stem": token.get(
                     "stem",
                     "",
                 ),
+
                 "word": token.get(
                     "word",
                     {},
                 ),
+
                 "letter": token.get(
                     "letter",
                     [],
                 ),
+
                 "lang": token.get(
                     "lang",
                     lang,
                 ),
+
                 "source": source,
+
             }
 
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
             # ROUTE 1 — LETTER GRID
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
 
-            for letter_index in self._letter_cells(
+            for letter_idx in self._letter_cells(
                 token
             ):
+
                 self._place_letter(
-                    letter_index,
+                    letter_idx,
                     record,
                 )
 
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
             # ROUTE 2 — WORD GRID
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
 
             self._place_word(
                 token,
                 record,
             )
 
-            # ----------------------------------------------------------
-            # ROUTE 3 — STORAGE GRID
-            # ----------------------------------------------------------
+        # -------------------------------------------------------------
+        # ROUTE 3 — FULL-TEXT GSP STORAGE
+        #
+        # IMPORTANT:
+        #
+        # This is performed once for the complete entry.
+        #
+        # K and D do not participate.
+        # -------------------------------------------------------------
 
-            self._place_storage(
-                token,
-                record,
-            )
+        document_record = {
+
+            "doc_id": doc_id,
+
+            "original": text,
+
+            "stem": "",
+
+            "word": {},
+
+            "letter": [],
+
+            "lang": lang,
+
+            "source": source,
+
+            "storage_gsp": self._storage_gsp(
+                text,
+                lang,
+            ),
+
+        }
+
+        self._place_storage(
+            text,
+            lang,
+            document_record,
+        )
 
         return doc_id
 
-    # ==================================================================
+    # =================================================================
     # RETRIEVAL — ONE TOKEN
-    # ==================================================================
+    # =================================================================
 
     def retrieve_by_token(
         self,
@@ -536,11 +844,8 @@ class MemoryGrid:
         List[Dict[str, Any]]
     ]:
         """
-        Retrieve candidates for one token through all three routes.
-
-        Retrieval remains separated by route.
-
-        No ranking is performed here.
+        Retrieve candidates for one token through the independent
+        token routes.
 
         Returns:
 
@@ -549,26 +854,32 @@ class MemoryGrid:
                 "word": [...],
                 "storage": [...]
             }
+
+        No ranking occurs here.
         """
 
         result = {
+
             "letter": [],
+
             "word": [],
+
             "storage": [],
+
         }
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # LETTER ROUTE
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
 
         seen_letter = set()
 
-        for letter_index in self._letter_cells(
+        for letter_idx in self._letter_cells(
             token_info
         ):
 
             entries = self.get_tokens_at_letter(
-                letter_index
+                letter_idx
             )
 
             for item in entries:
@@ -579,6 +890,7 @@ class MemoryGrid:
                 )
 
                 if key in seen_letter:
+
                     continue
 
                 seen_letter.add(
@@ -589,9 +901,9 @@ class MemoryGrid:
                     item
                 )
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # WORD ROUTE
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
 
         word_row, word_col = self._word_cell(
             token_info
@@ -600,250 +912,4 @@ class MemoryGrid:
         word_entries = self.get_tokens_at_word(
             word_row,
             word_col,
-        )
-
-        seen_word = set()
-
-        for item in word_entries:
-
-            key = (
-                item.get("doc_id"),
-                item.get("original"),
-            )
-
-            if key in seen_word:
-                continue
-
-            seen_word.add(
-                key
-            )
-
-            result["word"].append(
-                item
-            )
-
-        # --------------------------------------------------------------
-        # STORAGE ROUTE
-        # --------------------------------------------------------------
-
-        seen_storage = set()
-
-        for storage_row in self._storage_cells(
-            token_info
-        ):
-
-            storage_entries = (
-                self.get_tokens_at_storage(
-                    storage_row
-                )
-            )
-
-            for item in storage_entries:
-
-                key = (
-                    item.get("doc_id"),
-                    item.get("original"),
-                )
-
-                if key in seen_storage:
-                    continue
-
-                seen_storage.add(
-                    key
-                )
-
-                result["storage"].append(
-                    item
-                )
-
-        return result
-
-    # ==================================================================
-    # RETRIEVAL — MULTIPLE TOKENS
-    # ==================================================================
-
-    def retrieve(
-        self,
-        token_infos: List[
-            Dict[str, Any]
-        ],
-    ) -> Dict[
-        str,
-        List[Dict[str, Any]]
-    ]:
-        """
-        Retrieve candidates for multiple query tokens.
-
-        The three routes remain separate.
-
-        This method does not decide which route is more important.
-        Ranking belongs to the higher-level understanding/ranking
-        architecture.
-        """
-
-        result = {
-            "letter": [],
-            "word": [],
-            "storage": [],
-        }
-
-        seen = {
-            "letter": set(),
-            "word": set(),
-            "storage": set(),
-        }
-
-        for token_info in token_infos:
-
-            routes = self.retrieve_by_token(
-                token_info
-            )
-
-            for route in (
-                "letter",
-                "word",
-                "storage",
-            ):
-
-                for item in routes[route]:
-
-                    key = (
-                        item.get("doc_id"),
-                        item.get("original"),
-                    )
-
-                    if key in seen[route]:
-                        continue
-
-                    seen[route].add(
-                        key
-                    )
-
-                    result[route].append(
-                        item
-                    )
-
-        return result
-
-    # ==================================================================
-    # DOCUMENT ACCESS
-    # ==================================================================
-
-    def get_doc(
-        self,
-        doc_id: int,
-    ) -> str:
-        """
-        Return complete document text.
-        """
-
-        if not (
-            0 <= doc_id < len(
-                self.doc_store
-            )
-        ):
-            return ""
-
-        return self.doc_store[
-            doc_id
-        ].get(
-            "text",
-            "",
-        )
-
-    def get_doc_tokens(
-        self,
-        doc_id: int,
-    ) -> list:
-        """
-        Return tokenizer output for a document.
-        """
-
-        if not (
-            0 <= doc_id < len(
-                self.doc_store
-            )
-        ):
-            return []
-
-        return self.doc_store[
-            doc_id
-        ].get(
-            "tokens",
-            [],
-        )
-
-    def get_doc_source(
-        self,
-        doc_id: int,
-    ) -> str:
-        """
-        Return the source associated with a document.
-        """
-
-        if not (
-            0 <= doc_id < len(
-                self.doc_store
-            )
-        ):
-            return ""
-
-        return self.doc_store[
-            doc_id
-        ].get(
-            "source",
-            "",
-        )
-
-    def get_doc_language(
-        self,
-        doc_id: int,
-    ) -> str:
-        """
-        Return the normalized language of a document.
-        """
-
-        if not (
-            0 <= doc_id < len(
-                self.doc_store
-            )
-        ):
-            return ""
-
-        return self.doc_store[
-            doc_id
-        ].get(
-            "lang",
-            "en",
-        )
-
-    # ==================================================================
-    # LEGACY COMPATIBILITY
-    # ==================================================================
-
-    def get_tokens_at(
-        self,
-        row: int,
-        col: int,
-    ) -> List[Dict[str, Any]]:
-        """
-        Legacy compatibility accessor.
-
-        Historically callers used:
-
-            get_tokens_at(row, col)
-
-        Under the three-route architecture, this is interpreted as
-        Word Grid access.
-
-        New code should use the explicit methods:
-
-            get_tokens_at_letter()
-            get_tokens_at_word()
-            get_tokens_at_storage()
-        """
-
-        return self.get_tokens_at_word(
-            row,
-            col,
         )
