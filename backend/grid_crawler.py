@@ -868,4 +868,166 @@ class GridCrawler:
     # INDEX MANY CRAWLED CANDIDATES
     # ========================================================================
 
-    def index_crawled_candidate
+    def index_crawled_candidates(
+        self,
+        candidates: List[
+            Dict[str, Any]
+        ],
+        lang: str = "en",
+        source: str = "crawler",
+    ) -> List[int]:
+        """
+        Index every externally obtained candidate into MemoryGrid.
+
+        Already-indexed MemoryGrid candidates are not required to pass
+        through this method; this method is intended for newly obtained
+        external crawler material.
+        """
+
+        document_ids: List[int] = []
+
+        for candidate in candidates:
+
+            text = (
+                candidate.get(
+                    "text"
+                )
+                or candidate.get(
+                    "content"
+                )
+                or candidate.get(
+                    "body"
+                )
+            )
+
+            if not text:
+                continue
+
+            candidate_lang = (
+                candidate.get(
+                    "lang"
+                )
+                or lang
+            )
+
+            doc_id = (
+                self.index_crawled_candidate(
+                    text=text,
+                    lang=candidate_lang,
+                    source=(
+                        candidate.get(
+                            "source"
+                        )
+                        or source
+                    ),
+                )
+            )
+
+            if doc_id is not None:
+
+                document_ids.append(
+                    doc_id
+                )
+
+        return document_ids
+
+
+# ============================================================================
+# FUNCTIONAL API
+# ============================================================================
+
+def crawl(
+    memory_grid: Any,
+    start_row: int,
+    start_col: int,
+    limit: int = DEFAULT_LIMIT,
+    L: Optional[int] = None,
+    S: Optional[int] = None,
+    c: Optional[int] = None,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Functional compatibility wrapper.
+
+    Existing callers can continue using:
+
+        crawl(
+            memory,
+            row,
+            col,
+            limit=...
+        )
+
+    Optional L/S/c enable Elastic Cloud integration.
+    """
+
+    crawler = GridCrawler(
+        memory_grid
+    )
+
+    return crawler.crawl(
+        start_row=start_row,
+        start_col=start_col,
+        L=L,
+        S=S,
+        c=c,
+        limit=limit,
+    )
+
+
+def crawl_word(
+    memory_grid: Any,
+    word: str,
+    lang: str = "en",
+    limit: int = DEFAULT_LIMIT,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Convenience wrapper for word-based crawling.
+    """
+
+    crawler = GridCrawler(
+        memory_grid
+    )
+
+    return crawler.crawl_word(
+        word=word,
+        lang=lang,
+        limit=limit,
+    )
+
+
+# ============================================================================
+# CONFIGURATION ACCESS
+# ============================================================================
+
+def crawler_config() -> Dict[str, int]:
+    """
+    Return canonical crawler configuration.
+
+    These parameters belong exclusively to the crawler layer.
+    """
+
+    return {
+        "K": CRAWLER_K,
+        "forward_d": FORWARD_D,
+        "backward_k": BACKWARD_K,
+        "backward_d": BACKWARD_D,
+    }
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "CoMpaNeoN Grid Crawler"
+    )
+
+    print(
+        crawler_config()
+    )
