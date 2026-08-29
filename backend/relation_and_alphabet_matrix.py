@@ -35,7 +35,7 @@ Architecture:
 """
 
 from __future__ import annotations
-
+from langdetect import detect, LangDetectException
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import string
