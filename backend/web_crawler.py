@@ -4,102 +4,90 @@ CoMpaNeoN Web Crawler
 
 External knowledge acquisition layer.
 
-Architecture
+ARCHITECTURE
 ------------
 
-WebCrawler
-    ↓
-Web / external source
-    ↓
-Tokenizer
-    ↓
-MemoryGrid
-    ↓
-GridCrawler / GridScheduler
-    ↓
-AI training / retrieval
+                    external.py
+                         │
+              External source directions
+                         │
+                         ▼
+                    WebCrawler
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+        Web          YouTube        ApiTube/API
+          │              │              │
+          └──────────────┼──────────────┘
+                         │
+                         ▼
+                 Content extraction
+                         │
+                 checksum + metadata
+                         │
+                         ▼
+                    tokenizer.py
+                         │
+                         ▼
+                    MemoryGrid
+                         │
+                         ▼
+                 GridCrawler / GridCV
+                         │
+                         ▼
+                  WordChain + Ranking
+                         │
+                         ▼
+                 WordUnderstanding
+                         │
+                         ▼
+                   PromptManager
 
-The WebCrawler does NOT own:
+RESPONSIBILITIES
+----------------
 
-    - GSP placement mathematics
-    - Word Grid placement
-    - MemoryGrid retrieval
-    - GridCrawler traversal
-    - AI training
+WebCrawler:
+
+    - acquire external information
+    - follow source directions
+    - fetch HTML/API/video metadata
+    - extract readable text
+    - acquire subtitles/transcripts when available
+    - calculate content checksums
+    - detect unchanged content
+    - attach source metadata
+    - tokenize acquired text
+    - send documents into MemoryGrid
+    - expose crawl statistics
+
+WebCrawler does NOT own:
+
+    - GSP mathematics
+    - alphabet mathematics
+    - Word Grid mathematics
     - ranking
-    - response generation
+    - WordChain
+    - WordUnderstanding
+    - PromptManager
+    - AI response generation
+    - MemoryGrid placement mathematics
 
-Its responsibility is to acquire external information, tokenize it,
-and index it into the cloud-based MemoryGrid.
+The canonical linguistic authority remains tokenizer.py.
 
-ARCHITECTURAL STORAGE MODEL
-----------------------------
+The canonical storage/indexing authority remains MemoryGrid.
 
-The cloud MemoryGrid is the persistent retrieval box used by the AI.
-
-It can contain:
-
-    1. Web-crawled knowledge
-    2. User-entered knowledge
-    3. AI-generated knowledge/output
-    4. Training material
-    5. Domain/dictionary knowledge
-    6. Other indexed knowledge
-
-The physical/user storage layer is separate.
-
-After an AI instance is downloaded for a user or organization, its
-physical storage endpoint may contain partitioned local representations
-of:
-
-    - MemoryGrid data
-    - web-crawled data
-    - STM/LTM data
-    - AI-generated data
-    - user/profile data
-
-Those physical partitions remain deterministic and belong to that
-user/organization's downloaded AI file.
-
-The cloud MemoryGrid remains the continuously accessible knowledge
-source.
-
-IMPORTANT
----------
-
-The WebCrawler does not independently create:
-
-    col = ord(first_letter) - 97
-
-That would duplicate and eventually diverge from tokenizer.py.
-
-Instead:
-
-    WebCrawler
-        → tokenizer.py
-        → MemoryGrid.add_document()
-
-The tokenizer remains the canonical authority for:
-
-    - language normalization
-    - alphabet mapping
-    - letter index
-    - Word Grid coordinate
-    - language-specific alphabet dimensions
-
-The MemoryGrid remains the canonical cloud retrieval box.
-
-The GridCrawler remains responsible for crawling through the grid.
-
-The CrawlerScheduler remains responsible for scheduling crawler work.
-
-The WebCrawler therefore feeds the MemoryGrid rather than maintaining
-a separate competing word index.
+The crawler is an acquisition layer, not a competing database.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import hashlib
+import json
+import os
+import re
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -116,26 +104,74 @@ from tokenizer import (
 )
 
 
+# ---------------------------------------------------------------------------
+# OPTIONAL EXTERNAL DIRECTIONS
+# ---------------------------------------------------------------------------
+
+try:
+    from external import (
+        fetch_dictionary,
+        fetch_news,
+        fetch_books,
+        fetch_elibrary,
+        fetch_wikipedia,
+        fetch_github_ebooks,
+        fetch_code_textbook,
+        fetch_alphavantage,
+        fetch_financial_modelling_prep,
+        fetch_youtube,
+        fetch_apitube,
+    )
+except ImportError:
+    # The crawler can still operate as a normal HTTP crawler if
+    # external.py has not yet exposed every source adapter.
+    fetch_dictionary = None
+    fetch_news = None
+    fetch_books = None
+    fetch_elibrary = None
+    fetch_wikipedia = None
+    fetch_github_ebooks = None
+    fetch_code_textbook = None
+    fetch_alphavantage = None
+    fetch_financial_modelling_prep = None
+    fetch_youtube = None
+    fetch_apitube = None
+
+
 class WebCrawler:
     """
-    External web knowledge acquisition layer.
+    CoMpaNeoN external knowledge acquisition layer.
 
-    The crawler acquires external text and places the resulting
-    knowledge into the cloud-based MemoryGrid.
+    A WebCrawler instance receives a shared MemoryGrid and feeds
+    acquired external information into that grid.
 
-    Parameters
-    ----------
-    memory_grid:
-        Shared MemoryGrid instance.
+    Source-specific acquisition can be delegated to external.py.
 
-    timeout:
-        HTTP request timeout in seconds.
+    Example:
+
+        crawler = WebCrawler(memory_grid)
+
+        crawler.crawl(
+            "https://example.com"
+        )
+
+    Or:
+
+        crawler.acquire_external(
+            source="wikipedia",
+            query="quantum mechanics",
+        )
     """
+
+    # ======================================================================
+    # INITIALIZATION
+    # ======================================================================
 
     def __init__(
         self,
         memory_grid,
-        timeout: float = 10.0,
+        timeout: float = 15.0,
+        user_agent: str = "CoMpaNeoN-WebCrawler/1.0",
     ) -> None:
 
         self.memory = memory_grid
@@ -144,41 +180,147 @@ class WebCrawler:
 
         self.scheduler = CrawlerScheduler()
 
-        self.timeout = float(
-            timeout
-        )
+        self.timeout = float(timeout)
+
+        self.user_agent = user_agent
 
         # --------------------------------------------------------------
-        # Crawl statistics
+        # Statistics
         # --------------------------------------------------------------
 
         self.pages_crawled = 0
-
         self.pages_cached = 0
 
         self.documents_indexed = 0
-
         self.tokens_indexed = 0
 
-    # ==================================================================
-    # FETCH
-    # ==================================================================
+        self.external_requests = 0
+        self.external_documents = 0
+
+        self.video_sources = 0
+        self.transcripts_acquired = 0
+
+        # --------------------------------------------------------------
+        # Source registry
+        # --------------------------------------------------------------
+
+        self.external_sources = {
+            "dictionary": fetch_dictionary,
+            "news": fetch_news,
+            "books": fetch_books,
+            "elibrary": fetch_elibrary,
+            "wikipedia": fetch_wikipedia,
+            "github_ebooks": fetch_github_ebooks,
+            "code_textbook": fetch_code_textbook,
+            "alphavantage": fetch_alphavantage,
+            "financial_modeling_prep": (
+                fetch_financial_modelling_prep
+            ),
+            "youtube": fetch_youtube,
+            "apitube": fetch_apitube,
+        }
+
+    # ======================================================================
+    # TIME
+    # ======================================================================
+
+    @staticmethod
+    def _timestamp() -> str:
+        """
+        Return a deterministic UTC acquisition timestamp.
+        """
+
+        return datetime.now(
+            timezone.utc
+        ).isoformat()
+
+    # ======================================================================
+    # HASH
+    # ======================================================================
+
+    @staticmethod
+    def content_hash(
+        text: str,
+    ) -> str:
+        """
+        SHA-256 checksum of normalized content.
+
+        Used for:
+
+            - duplicate detection
+            - change detection
+            - source verification
+            - memory indexing metadata
+        """
+
+        normalized = (
+            str(text)
+            .strip()
+            .replace(
+                "\r\n",
+                "\n",
+            )
+        )
+
+        return hashlib.sha256(
+            normalized.encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    # ======================================================================
+    # URL HASH
+    # ======================================================================
+
+    @staticmethod
+    def source_hash(
+        url: str,
+    ) -> str:
+        """
+        Deterministic source identifier.
+        """
+
+        return hashlib.sha256(
+            str(url)
+            .strip()
+            .encode("utf-8")
+        ).hexdigest()
+
+    # ======================================================================
+    # HTTP HEADERS
+    # ======================================================================
+
+    def _headers(
+        self,
+    ) -> Dict[str, str]:
+
+        return {
+            "User-Agent": self.user_agent,
+            "Accept": (
+                "text/html,"
+                "application/xhtml+xml,"
+                "application/json,"
+                "text/plain"
+            ),
+        }
+
+    # ======================================================================
+    # FETCH WEB PAGE
+    # ======================================================================
 
     def fetch_text(
         self,
         url: str,
     ) -> str:
         """
-        Fetch a web page and extract visible textual content.
-
-        HTML structure is removed before the content enters the
-        tokenizer / MemoryGrid pipeline.
+        Fetch a normal web page and extract visible text.
         """
 
         response = httpx.get(
             url,
             timeout=self.timeout,
             follow_redirects=True,
+            headers=self._headers(),
         )
 
         response.raise_for_status()
@@ -188,14 +330,14 @@ class WebCrawler:
             "html.parser",
         )
 
-        # Remove elements that should not become knowledge tokens.
-
         for element in soup(
             [
                 "script",
                 "style",
                 "noscript",
                 "template",
+                "svg",
+                "canvas",
             ]
         ):
             element.decompose()
@@ -205,25 +347,118 @@ class WebCrawler:
             strip=True,
         )
 
-    # ==================================================================
+    # ======================================================================
+    # FETCH RAW JSON
+    # ======================================================================
+
+    def fetch_json(
+        self,
+        url: str,
+        params: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch a JSON endpoint.
+
+        Used when a source exposes structured metadata rather than HTML.
+        """
+
+        response = httpx.get(
+            url,
+            params=params,
+            timeout=self.timeout,
+            follow_redirects=True,
+            headers=self._headers(),
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        if isinstance(data, dict):
+            return data
+
+        return {
+            "data": data
+        }
+
+    # ======================================================================
     # LANGUAGE
-    # ==================================================================
+    # ======================================================================
 
     def _resolve_language(
         self,
         lang: Optional[str],
     ) -> str:
-        """
-        Normalize the language before tokenization.
-        """
 
         return normalize_lang(
             lang or "en"
         )
 
-    # ==================================================================
-    # TOKENIZATION / INDEXING
-    # ==================================================================
+    # ======================================================================
+    # LANGUAGE DETECTION
+    # ======================================================================
+
+    def detect_language(
+        self,
+        text: str,
+        fallback: str = "en",
+    ) -> str:
+        """
+        Detect language when possible.
+
+        langdetect remains optional so that crawler acquisition does not
+        become dependent on it during environments where the package has
+        not yet been installed.
+        """
+
+        try:
+
+            from langdetect import detect
+
+            if not text.strip():
+                return fallback
+
+            detected = detect(
+                text
+            )
+
+            return normalize_lang(
+                detected
+            )
+
+        except Exception:
+
+            return self._resolve_language(
+                fallback
+            )
+
+    # ======================================================================
+    # NORMALIZE TEXT
+    # ======================================================================
+
+    @staticmethod
+    def normalize_text(
+        text: str,
+    ) -> str:
+        """
+        Normalize whitespace while preserving textual content.
+        """
+
+        text = str(text)
+
+        text = re.sub(
+            r"\s+",
+            " ",
+            text,
+        )
+
+        return text.strip()
+
+    # ======================================================================
+    # TOKENIZATION
+    # ======================================================================
 
     def index_words(
         self,
@@ -231,19 +466,16 @@ class WebCrawler:
         lang: str = "en",
     ) -> Dict[str, Any]:
         """
-        Tokenize external text using the canonical tokenizer.
+        Send acquired content through the canonical tokenizer.
 
-        No independent alphabet calculation is performed here.
-
-        The tokenizer determines:
+        WebCrawler does not calculate:
 
             letter indices
-            Word Grid positions
-            language alphabet
-            word length
-            stems
+            alphabet dimensions
+            Word Grid coordinates
+            GSP cells
 
-        The resulting document is then handed to MemoryGrid.
+        tokenizer.py owns those responsibilities.
         """
 
         lang = self._resolve_language(
@@ -261,29 +493,103 @@ class WebCrawler:
             "token_count": len(tokens),
         }
 
-    # ==================================================================
+    # ======================================================================
+    # METADATA
+    # ======================================================================
+
+    def build_metadata(
+        self,
+        *,
+        url: str = "",
+        source_type: str = "web",
+        lang: str = "en",
+        title: str = "",
+        content_hash: str = "",
+        content_type: str = "text",
+        author: str = "",
+        published_at: Optional[str] = None,
+        duration: Optional[float] = None,
+        subtitles: bool = False,
+        transcript: bool = False,
+        extra: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> Dict[str, Any]:
+
+        metadata: Dict[str, Any] = {
+
+            "source": source_type,
+
+            "source_url": url,
+
+            "source_id": (
+                self.source_hash(url)
+                if url
+                else ""
+            ),
+
+            "title": title,
+
+            "language": lang,
+
+            "content_type": content_type,
+
+            "content_hash": content_hash,
+
+            "author": author,
+
+            "published_at": published_at,
+
+            "duration": duration,
+
+            "subtitles_available": subtitles,
+
+            "transcript_available": transcript,
+
+            "acquired_at": self._timestamp(),
+
+            "crawler": "CoMpaNeoN-WebCrawler",
+
+            "crawler_version": "1.0",
+
+        }
+
+        if extra:
+            metadata.update(
+                extra
+            )
+
+        return metadata
+
+    # ======================================================================
     # MEMORYGRID INDEXING
-    # ==================================================================
+    # ======================================================================
 
     def index_into_memory(
         self,
         text: str,
-        url: str,
+        url: str = "",
         lang: str = "en",
-        source_type: ContentType = ContentType.NORMAL_WEB,
+        source_type: Any = "web",
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
     ) -> Dict[str, Any]:
         """
-        Store crawled knowledge in the shared cloud MemoryGrid.
+        Index acquired content into MemoryGrid.
 
-        MemoryGrid owns the actual indexing routes.
-
-        WebCrawler does not recreate:
-
-            Letter Grid
-            Word Grid
-            Storage Grid
-            GSP placement
+        MemoryGrid remains the canonical storage/indexing authority.
         """
+
+        text = self.normalize_text(
+            text
+        )
+
+        if not text:
+            return {
+                "indexed": False,
+                "reason": "empty_content",
+            }
 
         lang = self._resolve_language(
             lang
@@ -294,45 +600,127 @@ class WebCrawler:
             lang,
         )
 
+        source_label = (
+            str(source_type)
+        )
+
+        if url:
+            source_label = (
+                f"{source_label}:{url}"
+            )
+
+        # --------------------------------------------------------------
+        # MemoryGrid owns actual placement.
+        # --------------------------------------------------------------
+
         doc_id = self.memory.add_document(
             text=text,
             lang=lang,
-            source=f"{source_type}:{url}",
+            source=source_label,
         )
-
-        token_count = token_data[
-            "token_count"
-        ]
 
         self.documents_indexed += 1
 
-        self.tokens_indexed += token_count
+        self.tokens_indexed += (
+            token_data["token_count"]
+        )
 
         return {
+            "indexed": True,
             "doc_id": doc_id,
-            "url": url,
-            "source_type": str(
-                source_type
-            ),
             "language": lang,
-            "token_count": token_count,
+            "token_count": token_data[
+                "token_count"
+            ],
             "tokens": token_data[
                 "tokens"
             ],
+            "metadata": metadata or {},
         }
 
-    # ==================================================================
-    # CRAWL
-    # ==================================================================
+    # ======================================================================
+    # DOCUMENT ACQUISITION
+    # ======================================================================
+
+    def acquire_document(
+        self,
+        text: str,
+        *,
+        url: str = "",
+        lang: Optional[str] = None,
+        source_type: str = "web",
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Common acquisition path for every external source.
+
+        All sources eventually converge here.
+        """
+
+        text = self.normalize_text(
+            text
+        )
+
+        if not text:
+            return {
+                "indexed": False,
+                "text": "",
+            }
+
+        resolved_lang = (
+            self.detect_language(
+                text
+            )
+            if lang is None
+            else self._resolve_language(
+                lang
+            )
+        )
+
+        checksum = self.content_hash(
+            text
+        )
+
+        final_metadata = (
+            metadata
+            or self.build_metadata(
+                url=url,
+                source_type=source_type,
+                lang=resolved_lang,
+                content_hash=checksum,
+            )
+        )
+
+        result = self.index_into_memory(
+            text=text,
+            url=url,
+            lang=resolved_lang,
+            source_type=source_type,
+            metadata=final_metadata,
+        )
+
+        result.update({
+            "url": url,
+            "source_type": source_type,
+            "content_hash": checksum,
+        })
+
+        return result
+
+    # ======================================================================
+    # CRAWL ONE WEB PAGE
+    # ======================================================================
 
     def crawl(
         self,
         url: str,
-        source_type: ContentType = ContentType.NORMAL_WEB,
-        lang: str = "en",
+        source_type: Any = ContentType.NORMAL_WEB,
+        lang: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Crawl one external page.
+        Crawl one external web page.
 
         Pipeline:
 
@@ -340,216 +728,17 @@ class WebCrawler:
              ↓
             PageCache
              ↓
-            HTTP fetch
+            HTTP
              ↓
             HTML extraction
              ↓
-            tokenizer.py
+            checksum
+             ↓
+            language detection
+             ↓
+            tokenizer
              ↓
             MemoryGrid
-             ↓
-            GridCrawler retrieval
         """
 
-        lang = self._resolve_language(
-            lang
-        )
-
-        # --------------------------------------------------------------
-        # CACHE
-        # --------------------------------------------------------------
-
-        cached_data, cached_hash = (
-            self.page_cache.get(url)
-        )
-
-        if cached_data is not None:
-
-            self.pages_cached += 1
-
-            return {
-                "url": url,
-                "cached": True,
-                "changed": False,
-                "language": lang,
-                "text": cached_data,
-                "content_hash": cached_hash,
-                "indexed": False,
-            }
-
-        # --------------------------------------------------------------
-        # FETCH
-        # --------------------------------------------------------------
-
-        text = self.fetch_text(
-            url
-        )
-
-        if not text:
-            return {
-                "url": url,
-                "cached": False,
-                "changed": False,
-                "language": lang,
-                "text": "",
-                "indexed": False,
-            }
-
-        self.pages_crawled += 1
-
-        # --------------------------------------------------------------
-        # CONTENT HASH
-        # --------------------------------------------------------------
-
-        content_hash = (
-            self.page_cache._hash(
-                text
-            )
-        )
-
-        # --------------------------------------------------------------
-        # CHANGE DETECTION
-        # --------------------------------------------------------------
-
-        changed = (
-            self.page_cache.has_changed(
-                url,
-                text,
-            )
-        )
-
-        if not changed:
-
-            self.page_cache.set(
-                url,
-                content_hash,
-                text,
-            )
-
-            return {
-                "url": url,
-                "cached": False,
-                "changed": False,
-                "language": lang,
-                "text": text,
-                "content_hash": content_hash,
-                "indexed": False,
-            }
-
-        # --------------------------------------------------------------
-        # INDEX INTO MEMORYGRID
-        # --------------------------------------------------------------
-
-        indexed = self.index_into_memory(
-            text=text,
-            url=url,
-            lang=lang,
-            source_type=source_type,
-        )
-
-        # --------------------------------------------------------------
-        # CACHE
-        # --------------------------------------------------------------
-
-        self.page_cache.set(
-            url,
-            content_hash,
-            text,
-        )
-
-        return {
-            "url": url,
-            "cached": False,
-            "changed": True,
-            "language": lang,
-            "text": text,
-            "content_hash": content_hash,
-            "indexed": True,
-            "doc_id": indexed[
-                "doc_id"
-            ],
-            "token_count": indexed[
-                "token_count"
-            ],
-        }
-
-    # ==================================================================
-    # CRAWL + SCHEDULE
-    # ==================================================================
-
-    def schedule(
-        self,
-        url: str,
-        source_type: ContentType = ContentType.NORMAL_WEB,
-        lang: str = "en",
-    ) -> Any:
-        """
-        Submit an external source to the crawler scheduler.
-
-        The scheduler controls when crawling occurs.
-        """
-
-        return self.scheduler.schedule(
-            url=url,
-            source_type=source_type,
-            lang=self._resolve_language(
-                lang
-            ),
-        )
-
-    # ==================================================================
-    # CRAWL MULTIPLE
-    # ==================================================================
-
-    def crawl_many(
-        self,
-        urls: list[str],
-        source_type: ContentType = ContentType.NORMAL_WEB,
-        lang: str = "en",
-    ) -> list[Dict[str, Any]]:
-        """
-        Crawl multiple external sources sequentially.
-
-        Parallel scheduling remains the responsibility of the
-        scheduler rather than this acquisition layer.
-        """
-
-        results = []
-
-        for url in urls:
-
-            results.append(
-                self.crawl(
-                    url=url,
-                    source_type=source_type,
-                    lang=lang,
-                )
-            )
-
-        return results
-
-    # ==================================================================
-    # STATISTICS
-    # ==================================================================
-
-    def stats(
-        self,
-    ) -> Dict[str, Any]:
-        """
-        Return crawler acquisition statistics.
-        """
-
-        return {
-            "pages_crawled": (
-                self.pages_crawled
-            ),
-            "pages_cached": (
-                self.pages_cached
-            ),
-            "documents_indexed": (
-                self.documents_indexed
-            ),
-            "tokens_indexed": (
-                self.tokens_indexed
-            ),
-        }
+        requested
