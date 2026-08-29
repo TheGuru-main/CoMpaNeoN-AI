@@ -66,14 +66,14 @@ WEIGHTS = {
     "perturbation": 30,
     "three_by_three": 40,
     "elastic_cloud": 30,
-    "freshness": 10,
+    "freshness": 20,
     "weak_lexical": 10,
-    "distant_relationship": 10,
-    "cloud_encounter": 10,
+    "distant_relationship": 13,
+    "cloud_encounter": 20,
     "unrelated_hierarchy": -20,
-    "word_pair": 20,
-    "next_word_prediction": 25,
-    "phrase_continuity": 20,
+    "word_pair": 40,
+    "next_word_prediction": 35,
+    "phrase_continuity": 40,
 }
 
 
