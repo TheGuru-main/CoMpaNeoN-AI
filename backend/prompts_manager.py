@@ -640,4 +640,232 @@ class PromptManager:
         sections = []
 
         if languages:
+             sections.append(
+                "Recognized programming technologies/languages:\n"
+                + "\n".join(
+                    f"- {item}"
+                    for item in languages
+                )
+            )
+
+        if terms:
+            sections.append(
+                "Recognized coding terms:\n"
+                + "\n".join(terms)
+            )
+
+        return "\n\n".join(sections)
+
+    # ==========================================================================
+    # KNOWLEDGE BOARD
+    # ==========================================================================
+
+    def build_knowledge_context(
+        self,
+        query: str,
+        domain: str,
+        context: str = "",
+        last_message: str = "",
+    ) -> str:
+
+        parts = []
+
+        if context and context.strip():
+            parts.append(
+                context.strip()
+            )
+
+        symbol_context = self._symbol_context(
+            query,
+            domain,
+        )
+
+        if symbol_context:
+            parts.append(
+                symbol_context
+            )
+
+        if domain == "code":
+
+            code_context = self._code_context(
+                query
+            )
+
+            if code_context:
+                parts.append(
+                    code_context
+                )
+
+        if last_message and last_message.strip():
+            parts.append(
+                "Last user message:\n"
+                + last_message.strip()
+            )
+
+        return "\n\n".join(parts)
+
+    # ==========================================================================
+    # MAIN PROMPT
+    # ==========================================================================
+
+    def build_prompt(
+        self,
+        query: str,
+        context: str = "",
+        country: Optional[str] = None,
+        language: Optional[str] = None,
+        conversation_history: str = "",
+        workspace_name: str = "",
+        last_message: str = "",
+        temperament: Optional[str] = None,
+        workspace_context: str = "",
+        verifier: str = "",
+        domain: str = "",
+        intent: str = "",
+    ) -> str:
+
+        query = query.strip()
+
+        active_language = (
+            language or self.default_language
+        )
+
+        active_country = (
+            country or self.default_country
+        )
+
+        active_temperament = (
+            temperament or self.default_temperament
+        )
+
+        # ------------------------------------------------------------------
+        # INTENT ANALYSIS
+        # ------------------------------------------------------------------
+
+        intent_data = self.analyze(
+            query=query,
+            language=active_language,
+        )
+
+        active_domain = self.resolve_domain(
+            query=query,
+            domain=domain,
+            intent_data=intent_data,
+        )
+
+        active_intent = (
+            intent.strip()
+            if intent.strip()
+            else str(
+                intent_data.get(
+                    "intent",
+                    ""
+                )
+            )
+        )
+
+        # ------------------------------------------------------------------
+        # KNOWLEDGE
+        # ------------------------------------------------------------------
+
+        knowledge_context = self.build_knowledge_context(
+            query=query,
+            domain=active_domain,
+            context=context,
+            last_message=last_message,
+        )
+
+        # ------------------------------------------------------------------
+        # WORKSPACE
+        # ------------------------------------------------------------------
+
+        final_workspace_context = (
+            workspace_context.strip()
+        )
+
+        if workspace_name:
+
+            workspace_line = (
+                f"Current project: {workspace_name}"
+            )
+
+            if final_workspace_context:
+
+                final_workspace_context = (
+                    workspace_line
+                    + "\n"
+                    + final_workspace_context
+                )
+
+            else:
+
+                final_workspace_context = (
+                    workspace_line
+                )
+
+        # ------------------------------------------------------------------
+        # TEMPLATE
+        # ------------------------------------------------------------------
+
+        template = PROMPTS.get(
+            active_domain,
+            PROMPTS["general"],
+        )
+
+        # ------------------------------------------------------------------
+        # FINAL PROMPT
+        # ------------------------------------------------------------------
+
+        return template.format(
+            query=query,
+            domain=active_domain,
+            intent=active_intent,
+            country=active_country,
+            language=active_language,
+            temperament=active_temperament,
+            knowledge_context=knowledge_context,
+            conversation_history=conversation_history or "",
+            workspace_context=final_workspace_context,
+            verifier=verifier or "",
+            sources=knowledge_context,
+            context=knowledge_context,
+        )
+
+
+# ==============================================================================
+# CONVENIENCE FUNCTION
+# ==============================================================================
+
+_default_manager = PromptManager()
+
+
+def build_prompt(
+    query: str,
+    context: str = "",
+    country: str = "Nigeria",
+    language: str = "en",
+    conversation_history: str = "",
+    workspace_name: str = "",
+    last_message: str = "",
+    temperament: str = "sanguine",
+    workspace_context: str = "",
+    verifier: str = "",
+    domain: str = "",
+    intent: str = "",
+) -> str:
+
+    return _default_manager.build_prompt(
+        query=query,
+        context=context,
+        country=country,
+        language=language,
+        conversation_history=conversation_history,
+        workspace_name=workspace_name,
+        last_message=last_message,
+        temperament=temperament,
+        workspace_context=workspace_context,
+        verifier=verifier,
+        domain=domain,
+        intent=intent,
+    )
        
