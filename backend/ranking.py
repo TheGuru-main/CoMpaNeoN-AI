@@ -59,21 +59,21 @@ from directives import detect_directive
 # ---------------------------------------------------------------------------
 
 WEIGHTS = {
-    "exact_lexical": 50,
+    "exact_lexical": 70,
     "same_entity": 50,
     "same_hierarchy": 50,
     "relationship": 30,
     "perturbation": 30,
     "three_by_three": 40,
     "elastic_cloud": 30,
-    "freshness": 20,
-    "weak_lexical": 10,
-    "distant_relationship": 13,
-    "cloud_encounter": 20,
+    "freshness": 30,
+    "weak_lexical": 20,
+    "distant_relationship": 30,
+    "cloud_encounter": 40,
     "unrelated_hierarchy": -20,
     "word_pair": 40,
     "next_word_prediction": 35,
-    "phrase_continuity": 40,
+    "phrase_continuity": 75,
 }
 
 
