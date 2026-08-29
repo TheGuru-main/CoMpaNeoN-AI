@@ -910,3 +910,374 @@ def save_training_examples(
     path: str = "data/alphabet_matrix_math.json",
     count: int = DEFAULT_EXAMPLE_COUNT,
 ) -> Dict[str, Any]:
+  """
+    Generate and save the deterministic matrix mathematics dataset.
+    """
+
+    examples = generate_training_examples(
+        count=count
+    )
+
+    metadata = training_metadata(
+        examples
+    )
+
+    payload = {
+        "metadata": metadata,
+        "examples": examples,
+    }
+
+    directory = os.path.dirname(path)
+
+    if directory:
+        os.makedirs(
+            directory,
+            exist_ok=True,
+        )
+
+    with open(
+        path,
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        json.dump(
+            payload,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    return metadata
+
+
+# ---------------------------------------------------------------------------
+# LOAD DATASET
+# ---------------------------------------------------------------------------
+
+def load_training_examples(
+    path: str = "data/alphabet_matrix_math.json",
+) -> List[Dict[str, Any]]:
+    """
+    Load previously generated matrix mathematics examples.
+    """
+
+    if not os.path.exists(path):
+        return []
+
+    with open(
+        path,
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        payload = json.load(f)
+
+    return payload.get(
+        "examples",
+        [],
+    )
+
+
+# ---------------------------------------------------------------------------
+# BUILD PAIR WEIGHT MAP
+# ---------------------------------------------------------------------------
+
+def build_pair_weight_map(
+    relationship_matrix: Dict[
+        int,
+        Sequence[str],
+    ],
+) -> Dict[str, float]:
+    """
+    Convert relationship classes into a direct pair -> weight mapping.
+
+    Example:
+
+        {
+            "AB": 0.97,
+            "CD": 0.94,
+            ...
+        }
+    """
+
+    result = {}
+
+    for class_id, pairs in relationship_matrix.items():
+
+        for position, pair in enumerate(pairs):
+
+            pair = str(
+                pair
+            ).strip().upper()
+
+            if len(pair) != 2:
+                continue
+
+            result[pair] = relationship_weight(
+                class_id=class_id,
+                pair_position=position,
+            )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# WEIGHTED PAIR SCORE
+# ---------------------------------------------------------------------------
+
+def weighted_pair_score(
+    pair: str,
+    pair_weights: Dict[str, float],
+) -> float:
+    """
+    Return the deterministic weight of an alphabet pair.
+    """
+
+    pair = str(
+        pair
+    ).strip().upper()
+
+    if pair in pair_weights:
+        return pair_weights[pair]
+
+    reverse = pair[::-1]
+
+    return pair_weights.get(
+        reverse,
+        0.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# WORD MATRIX SCORE
+# ---------------------------------------------------------------------------
+
+def word_matrix_score(
+    word: str,
+    alphabet: str,
+    matrix: torch.Tensor,
+) -> float:
+    """
+    Produce a deterministic numerical relationship score for a word.
+
+    Every adjacent alphabet pair contributes its corresponding matrix
+    relationship value.
+
+    The final result is normalized to 0.0 - 100.0.
+    """
+
+    word = str(
+        word
+    ).strip().lower()
+
+    if len(word) < 2:
+        return 0.0
+
+    alphabet = str(
+        alphabet
+    ).lower()
+
+    indices = {
+        letter: index
+        for index, letter
+        in enumerate(alphabet)
+    }
+
+    scores = []
+
+    for i in range(
+        len(word) - 1
+    ):
+
+        first = word[i]
+        second = word[i + 1]
+
+        if (
+            first not in indices
+            or second not in indices
+        ):
+            continue
+
+        score = matrix[
+            indices[first],
+            indices[second],
+        ].item()
+
+        scores.append(
+            float(score)
+        )
+
+    if not scores:
+        return 0.0
+
+    return (
+        sum(scores)
+        / len(scores)
+    ) * 100.0
+
+
+# ---------------------------------------------------------------------------
+# COMPOSITE MATRIX FEATURES
+# ---------------------------------------------------------------------------
+
+def matrix_features(
+    word: str,
+    alphabet: str,
+    matrix: torch.Tensor,
+) -> Dict[str, Any]:
+    """
+    Return numerical features that WordChain and Ranking can consume.
+    """
+
+    word = str(
+        word
+    ).strip().lower()
+
+    score = word_matrix_score(
+        word,
+        alphabet,
+        matrix,
+    )
+
+    pairs = []
+
+    for i in range(
+        len(word) - 1
+    ):
+
+        pair = word[
+            i:i + 2
+        ]
+
+        pairs.append({
+            "pair": pair,
+            "weight": float(
+                matrix[
+                    alphabet.lower().find(pair[0]),
+                    alphabet.lower().find(pair[1]),
+                ].item()
+            )
+            if (
+                pair[0] in alphabet.lower()
+                and pair[1] in alphabet.lower()
+            )
+            else 0.0,
+        })
+
+    return {
+        "word": word,
+        "matrix_score": score,
+        "pair_count": len(pairs),
+        "pairs": pairs,
+    }
+
+
+# ---------------------------------------------------------------------------
+# REGISTRY
+# ---------------------------------------------------------------------------
+
+def matrix_math_registry(
+    example_count: int = DEFAULT_EXAMPLE_COUNT,
+) -> Dict[str, Any]:
+    """
+    Return the complete deterministic mathematical registry.
+
+    This registry is suitable for deployment metadata and later model
+    synchronization.
+    """
+
+    examples = generate_training_examples(
+        count=example_count
+    )
+
+    return {
+        "module": "matrix_maths",
+        "version": 1,
+        "deterministic": True,
+        "default_example_count": DEFAULT_EXAMPLE_COUNT,
+        "operations": [
+            "matrix_multiplication",
+            "matrix_vector_multiplication",
+            "relationship_propagation",
+            "relationship_similarity",
+            "weighted_relationship_score",
+        ],
+        "training": training_metadata(
+            examples
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# DEVELOPMENT / VALIDATION
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    print(
+        "Generating deterministic matrix mathematics dataset..."
+    )
+
+    metadata = save_training_examples(
+        path="data/alphabet_matrix_math.json",
+        count=DEFAULT_EXAMPLE_COUNT,
+    )
+
+    print(
+        json.dumps(
+            metadata,
+            indent=2,
+        )
+    )
+
+    examples = load_training_examples(
+        "data/alphabet_matrix_math.json"
+    )
+
+    print(
+        f"Loaded {len(examples)} mathematical examples."
+    )
+
+    # Small demonstration matrix.
+    demo = torch.tensor(
+        [
+            [1.0, 0.8, 0.2],
+            [0.8, 1.0, 0.6],
+            [0.2, 0.6, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+
+    vector = torch.tensor(
+        [1.0, 0.5, 0.25],
+        dtype=torch.float32,
+    )
+
+    result = matrix_vector_multiply(
+        demo,
+        vector,
+    )
+
+    print(
+        "Matrix-vector result:",
+        result.tolist(),
+    )
+
+    propagated = propagate_relationships(
+        demo,
+        vector,
+        steps=2,
+    )
+
+    print(
+        "Propagated relationship:",
+        propagated.tolist(),
+    )
+
+    print(
+        "Validation:",
+        validate_training_examples(
+            examples
+        ),
+    )
