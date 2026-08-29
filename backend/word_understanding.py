@@ -1,12 +1,78 @@
+"""
+Word Understanding Module
+=========================
+
+CoMpaNeoN Word Understanding Layer.
+
+Architecture:
+
+    MemoryGrid
+        │
+        ▼
+    GridCrawler
+        │
+        ▼
+    Retrieval Routes
+        │
+        ├── Letter Grid
+        ├── Word Grid
+        └── Storage Grid
+        │
+        ▼
+    Ranking
+        │
+        ▼
+    WordChain
+        │
+        ▼
+    WordUnderstanding
+        │
+        └── structured understanding
+                │
+                ▼
+        later: neutrals / prompts / AI model
+
+
+Responsibilities:
+- Retrieve knowledge from MemoryGrid.
+- Preserve the three retrieval routes.
+- Rank retrieved candidate documents.
+- Feed ranked knowledge into WordChain.
+- Use WordChain to establish word relationships and continuations.
+- Use tokenizer.py for linguistic tokenization.
+- Use alphabet-matrix relationships through WordChain.
+- Detect language dynamically.
+- Attach symbols, directives and domain metadata.
+- Produce a structured understanding object.
+
+Important:
+
+UNDERSTANDING != RESPONSE
+
+WordUnderstanding does not generate the final AI response.
+
+Memory ownership remains with MemoryGrid.
+
+Word relationships remain in WordChain.
+
+Ranking remains in ranking.py.
+
+Deep linguistic tokenization remains in tokenizer.py.
+
+The AI model remains separate.
+"""
+
 from __future__ import annotations
 
 import hashlib
-
 from typing import (
     List,
     Dict,
     Any,
+    Optional,
 )
+
+from langdetect import detect, LangDetectException
 
 from tokenizer import (
     tokenize,
@@ -27,89 +93,110 @@ from memory_cache import MemoryCache
 from ranking import score_candidate
 from intent_analyzer import detect_domain
 
+from word_chain import WordChain
+
+
+# =====================================================================
+# LANGUAGE DETECTION
+# =====================================================================
+
+def detect_lang(text: str) -> str:
+    """
+    Detect the language of a query or memory document.
+
+    normalize_lang() is applied afterward so tokenizer.py remains
+    the canonical language normalization layer.
+    """
+
+    try:
+        if not text or not str(text).strip():
+            return "en"
+
+        detected = detect(
+            str(text)
+        )
+
+        return normalize_lang(
+            detected
+        )
+
+    except (
+        LangDetectException,
+        Exception,
+    ):
+        return "en"
+
+
+# =====================================================================
+# WORD UNDERSTANDING
+# =====================================================================
 
 class WordUnderstanding:
     """
     CoMpaNeoN Word Understanding Layer.
 
-    This layer understands a query by entering the MemoryGrid through
-    three independent routes:
+    Retrieval and understanding are deliberately separated.
 
-        1. Letter Grid
-        2. Word Grid
-        3. Full-text / Storage Grid
+    Retrieval:
 
-    The routes remain independent during retrieval.
+        MemoryGrid
+            ↓
+        Letter / Word / Storage
+            ↓
+        Candidate documents
+            ↓
+        Ranking
 
-    They are unified only after retrieval, when candidate documents
-    are collected and ranked.
+    Linguistic relationship:
 
-    ---------------------------------------------------------------
-    LETTER GRID
-    ---------------------------------------------------------------
+        Ranked knowledge
+            ↓
+        WordChain
+            ↓
+        word relationships
+            ↓
+        continuation
+            ↓
+        understanding
 
-        Language alphabet × 1
-
-        Uses tokenizer letter mappings.
-
-    ---------------------------------------------------------------
-    WORD GRID
-    ---------------------------------------------------------------
-
-        Language alphabet × alphabet
-
-        Complete word mapping.
-
-        Word-grid rule:
-
-            L   = name length
-            uID = L
-            S   = L
-
-        Therefore:
-
-            S = L
-
-    ---------------------------------------------------------------
-    FULL-TEXT / STORAGE GRID
-    ---------------------------------------------------------------
-
-        Independent 64-row storage mapping.
-
-        This is handled by MemoryGrid.
-
-        WordUnderstanding does NOT recreate its placement formula.
-
-    ---------------------------------------------------------------
-
-    The module also attaches:
-
-        - directives
-        - domain
-        - symbols
-        - code terminology
-        - lexical scores
-        - retrieved context
-
-    It does not replace the ranking architecture.
+    WordUnderstanding therefore acts as the bridge between
+    retrieved/ranked memory and higher-level reasoning.
     """
 
-    # ==================================================================
+    # =================================================================
     # INITIALIZATION
-    # ==================================================================
+    # =================================================================
 
     def __init__(
         self,
         memory_grid: MemoryGrid,
+        word_chain: Optional[WordChain] = None,
     ):
         self.memory = memory_grid
+
+        # -------------------------------------------------------------
+        # Local caches
+        # -------------------------------------------------------------
 
         self.page_cache = PageCache()
         self.memory_cache = MemoryCache()
 
-    # ==================================================================
+        # -------------------------------------------------------------
+        # Word relationship engine
+        #
+        # Can be supplied by the application so that the same
+        # WordChain can persist across sessions.
+        # -------------------------------------------------------------
+
+        self.word_chain = (
+            word_chain
+            if word_chain is not None
+            else WordChain()
+        )
+
+    # =================================================================
     # HASH
-    # ==================================================================
+    # =================================================================
 
     def _hash(
         self,
@@ -117,17 +204,44 @@ class WordUnderstanding:
     ) -> str:
         """
         Produce a deterministic hash for text.
-
-        Kept available for cache/context workflows.
         """
 
         return hashlib.sha256(
-            text.encode("utf-8")
+            str(text).encode(
+                "utf-8"
+            )
         ).hexdigest()
 
-    # ==================================================================
+    # =================================================================
+    # LANGUAGE
+    # =================================================================
+
+    def _resolve_language(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+    ) -> str:
+        """
+        Resolve language.
+
+        Explicit language wins.
+
+        Otherwise langdetect determines the language.
+        tokenizer.py then normalizes it.
+        """
+
+        if lang:
+            return normalize_lang(
+                lang
+            )
+
+        return detect_lang(
+            text
+        )
+
+    # =================================================================
     # LETTER ROUTE
-    # ==================================================================
+    # =================================================================
 
     def _retrieve_letter_route(
         self,
@@ -135,17 +249,6 @@ class WordUnderstanding:
     ) -> List[Dict[str, Any]]:
         """
         Retrieve candidates through the Letter Grid.
-
-        The tokenizer has already resolved the token's letters into
-        alphabet indices.
-
-        This route does not calculate:
-
-            L + S
-            storage rows
-            word-grid coordinates
-
-        It simply follows the letter mappings.
         """
 
         results: List[
@@ -193,29 +296,19 @@ class WordUnderstanding:
 
         return results
 
-    # ==================================================================
+    # =================================================================
     # WORD ROUTE
-    # ==================================================================
+    # =================================================================
 
     def _retrieve_word_route(
         self,
         token: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve the complete word through the A×A Word Grid.
+        Retrieve a complete word through the Word Grid.
 
-        Word Grid rules are established by tokenizer.py:
-
-            L   = name length
-            uID = L
-            S   = L
-
-        Therefore S is equal to L.
-
-        The tokenizer resolves the word into its A×A coordinate.
-
-        WordUnderstanding does not reinterpret that coordinate as
-        a 64-row storage coordinate.
+        tokenizer.py remains responsible for producing the word
+        coordinate.
         """
 
         word = token.get(
@@ -266,9 +359,9 @@ class WordUnderstanding:
 
         return results
 
-    # ==================================================================
-    # FULL-TEXT / STORAGE ROUTE
-    # ==================================================================
+    # =================================================================
+    # STORAGE ROUTE
+    # =================================================================
 
     def _retrieve_storage_route(
         self,
@@ -276,19 +369,10 @@ class WordUnderstanding:
         limit: int,
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve through the independent 64-row storage route.
+        Retrieve through MemoryGrid's independent storage route.
 
-        The storage mapping belongs to MemoryGrid.
-
-        WordUnderstanding therefore does not reproduce the storage
-        formula here.
-
-        This is important because:
-
-            Word Grid != Storage Grid
-
-        The storage route is based on the independent storage
-        dimension established by MemoryGrid.
+        WordUnderstanding does not recreate MemoryGrid's placement
+        formula.
         """
 
         routes = (
@@ -322,9 +406,9 @@ class WordUnderstanding:
 
         return results
 
-    # ==================================================================
-    # THREE-ROUTE RETRIEVAL
-    # ==================================================================
+    # =================================================================
+    # THREE ROUTE RETRIEVAL
+    # =================================================================
 
     def _retrieve_three_routes(
         self,
@@ -336,19 +420,7 @@ class WordUnderstanding:
         List[Dict[str, Any]]
     ]:
         """
-        Enter the query into all three MemoryGrid routes.
-
-        The routes remain separate in the returned structure.
-
-        Returns:
-
-            {
-                "letter": [...],
-                "word": [...],
-                "storage": [...]
-            }
-
-        No ranking occurs here.
+        Enter a query through all MemoryGrid retrieval routes.
         """
 
         tokens = tokenize(
@@ -370,9 +442,9 @@ class WordUnderstanding:
 
         for token in tokens:
 
-            # ----------------------------------------------------------
-            # ROUTE 1 — LETTER
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
+            # Letter Grid
+            # ---------------------------------------------------------
 
             letter_results = (
                 self._retrieve_letter_route(
@@ -400,9 +472,9 @@ class WordUnderstanding:
                     result
                 )
 
-            # ----------------------------------------------------------
-            # ROUTE 2 — WORD
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
+            # Word Grid
+            # ---------------------------------------------------------
 
             word_results = (
                 self._retrieve_word_route(
@@ -430,9 +502,9 @@ class WordUnderstanding:
                     result
                 )
 
-            # ----------------------------------------------------------
-            # ROUTE 3 — STORAGE
-            # ----------------------------------------------------------
+            # ---------------------------------------------------------
+            # Storage Grid
+            # ---------------------------------------------------------
 
             storage_results = (
                 self._retrieve_storage_route(
@@ -463,9 +535,9 @@ class WordUnderstanding:
 
         return routes
 
-    # ==================================================================
-    # CANDIDATE DOCUMENT COLLECTION
-    # ==================================================================
+    # =================================================================
+    # DOCUMENT COLLECTION
+    # =================================================================
 
     def _collect_candidate_documents(
         self,
@@ -474,19 +546,17 @@ class WordUnderstanding:
             List[Dict[str, Any]]
         ],
     ) -> Dict[
-        int,
+        Any,
         Dict[str, Any]
     ]:
         """
-        Convert route-level token candidates into unique documents.
+        Convert token-level route results into unique documents.
 
-        Route identity is preserved in the candidate metadata.
-
-        A document can be discovered by multiple routes.
+        Multiple routes may discover the same document.
         """
 
         candidate_docs: Dict[
-            int,
+            Any,
             Dict[str, Any]
         ] = {}
 
@@ -510,8 +580,10 @@ class WordUnderstanding:
 
                 if doc_id not in candidate_docs:
 
-                    doc_text = self.memory.get_doc(
-                        doc_id
+                    doc_text = (
+                        self.memory.get_doc(
+                            doc_id
+                        )
                     )
 
                     if not doc_text:
@@ -535,27 +607,161 @@ class WordUnderstanding:
 
         return candidate_docs
 
-    # ==================================================================
+    # =================================================================
+    # WORDCHAIN INGESTION
+    # =================================================================
+
+    def _feed_word_chain(
+        self,
+        text: str,
+        source: str = "conversation",
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Feed retrieved knowledge into WordChain.
+
+        WordChain does not replace MemoryGrid.
+
+        It builds linguistic relationships from knowledge that has
+        already been retrieved or supplied by the system.
+        """
+
+        if not text:
+            return {
+                "words_added": 0,
+                "pairs_added": 0,
+                "source": source,
+            }
+
+        return self.word_chain.add_text(
+            text=text,
+            source=source,
+            metadata=metadata,
+        )
+
+    # =================================================================
+    # FEED RANKED DOCUMENTS
+    # =================================================================
+
+    def _feed_ranked_documents(
+        self,
+        ranked: List[
+            Dict[str, Any]
+        ],
+    ) -> None:
+        """
+        Feed ranked documents into WordChain.
+
+        Ranking determines which retrieved knowledge is important
+        enough to enter the immediate relationship-building stage.
+
+        Higher-ranked knowledge therefore has priority over lower-ranked
+        candidates.
+        """
+
+        for item in ranked:
+
+            text = item.get(
+                "text",
+                "",
+            )
+
+            if not text:
+                continue
+
+            # ---------------------------------------------------------
+            # Preserve source information when available.
+            # ---------------------------------------------------------
+
+            source = item.get(
+                "source",
+                "conversation",
+            )
+
+            self._feed_word_chain(
+                text=text,
+                source=source,
+                metadata={
+                    "doc_id": item.get(
+                        "doc_id"
+                    ),
+                    "ranking_score": item.get(
+                        "score",
+                        0.0,
+                    ),
+                    "routes": item.get(
+                        "routes",
+                        [],
+                    ),
+                },
+            )
+
+    # =================================================================
+    # WORDCHAIN QUERY
+    # =================================================================
+
+    def _query_word_chain(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Ask WordChain for the linguistic relationships surrounding
+        the query.
+
+        Two-word phrase continuation is preferred internally by
+        WordChain.
+        """
+
+        predictions = (
+            self.word_chain.predict_from_text(
+                query,
+                limit=limit,
+            )
+        )
+
+        pairs = (
+            self.word_chain.get_pairs(
+                word=(
+                    query.split()[-1]
+                    if query.split()
+                    else None
+                ),
+                limit=limit,
+            )
+        )
+
+        profile = (
+            self.word_chain.knowledge_profile()
+        )
+
+        return {
+            "predictions": predictions,
+            "pairs": pairs,
+            "profile": profile,
+        }
+
+    # =================================================================
     # CONTEXT RETRIEVAL
-    # ==================================================================
+    # =================================================================
 
     def get_context(
         self,
         query: str,
-        lang: str = "en",
+        lang: Optional[str] = None,
         limit: int = 10,
     ) -> str:
         """
-        Retrieve and rank contextual knowledge for a query.
+        Retrieve, rank and relationship-process contextual knowledge.
 
         Flow:
 
             Query
               │
               ├── Letter Grid
-              │
               ├── Word Grid
-              │
               └── Storage Grid
                        │
                        ▼
@@ -565,10 +771,10 @@ class WordUnderstanding:
                     Ranking
                        │
                        ▼
-                 Top Context
-
-        The three physical/logical memory routes remain separate.
-        Only their candidates are unified for ranking.
+                   WordChain
+                       │
+                       ▼
+                    Context
         """
 
         cached = self.memory_cache.get(
@@ -578,8 +784,9 @@ class WordUnderstanding:
         if cached:
             return cached
 
-        lang = normalize_lang(
-            lang
+        lang = self._resolve_language(
+            query,
+            lang,
         )
 
         tokens = tokenize(
@@ -590,17 +797,9 @@ class WordUnderstanding:
         if not tokens:
             return ""
 
-        # --------------------------------------------------------------
-        # DIRECTIVE
-        # --------------------------------------------------------------
-
         directive = detect_directive(
             query
         )
-
-        # --------------------------------------------------------------
-        # RETRIEVAL LIMIT
-        # --------------------------------------------------------------
 
         crawl_limit = limit
 
@@ -608,13 +807,11 @@ class WordUnderstanding:
             "entity_identity",
             "location",
         }:
-            crawl_limit = (
-                limit + 2
-            )
+            crawl_limit = limit + 2
 
-        # --------------------------------------------------------------
-        # THREE ROUTES
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
+        # RETRIEVE
+        # -------------------------------------------------------------
 
         routes = (
             self._retrieve_three_routes(
@@ -624,9 +821,9 @@ class WordUnderstanding:
             )
         )
 
-        # --------------------------------------------------------------
-        # COLLECT DOCUMENTS
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
+        # COLLECT
+        # -------------------------------------------------------------
 
         candidate_docs = (
             self._collect_candidate_documents(
@@ -643,17 +840,17 @@ class WordUnderstanding:
 
             return ""
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # DOMAIN
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
 
         domain = detect_domain(
             query
         )
 
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
         # RANK
-        # --------------------------------------------------------------
+        # -------------------------------------------------------------
 
         ranked: List[
             Dict[str, Any]
@@ -668,333 +865,5 @@ class WordUnderstanding:
                 )
             )
 
-            # ----------------------------------------------------------
-            # Candidate scoring
-            # ----------------------------------------------------------
-
             score_result = score_candidate(
-                query=query,
-                candidate_text=doc["text"],
-                query_entities=[],
-                query_hierarchy=domain,
-                candidate_entities=[],
-                candidate_hierarchy=domain,
-                freshness_score=0.0,
-                lang=lang,
-            )
-
-            ranked.append({
-                "doc_id": doc["doc_id"],
-                "text": doc["text"],
-                "score": score_result["total"],
-                "scores": score_result["scores"],
-                "routes": route_names,
-            })
-
-        # --------------------------------------------------------------
-        # SORT
-        # --------------------------------------------------------------
-
-        ranked.sort(
-            key=lambda item: item["score"],
-            reverse=True,
-        )
-
-        # --------------------------------------------------------------
-        # TOP CONTEXT
-        # --------------------------------------------------------------
-
-        context = "\n".join(
-            item["text"]
-            for item in ranked[:3]
-        )
-
-        self.memory_cache.set(
-            query,
-            context,
-        )
-
-        return context
-
-    # ==================================================================
-    # LEXICAL CANDIDATE SCORE
-    # ==================================================================
-
-    def score_candidate(
-        self,
-        query: str,
-        doc_text: str,
-        lang: str = "en",
-    ) -> float:
-        """
-        Calculate the local lexical score.
-
-        The tokenizer provides:
-
-            letter mappings
-            word mappings
-
-        Letter and word similarity remain independent components.
-
-        This method does not replace the global ranking.score_candidate()
-        system.
-        """
-
-        lang = normalize_lang(
-            lang
-        )
-
-        query_tokens = tokenize(
-            query,
-            lang,
-        )
-
-        if not query_tokens:
-            return 0.0
-
-        letter_component = letter_score(
-            query_tokens,
-            doc_text,
-            lang,
-        )
-
-        word_component = word_score(
-            query_tokens,
-            doc_text,
-            lang,
-        )
-
-        return (
-            letter_component * 0.4
-            + word_component * 0.6
-        )
-
-    # ==================================================================
-    # EXPLICIT DOCUMENT RANKING
-    # ==================================================================
-
-    def rank_documents(
-        self,
-        query: str,
-        doc_ids: List[int],
-        lang: str = "en",
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Rank explicitly supplied documents using the local lexical
-        scoring layer.
-        """
-
-        lang = normalize_lang(
-            lang
-        )
-
-        scored: List[
-            Dict[str, Any]
-        ] = []
-
-        for doc_id in doc_ids:
-
-            text = self.memory.get_doc(
-                doc_id
-            )
-
-            if not text:
-                continue
-
-            score = self.score_candidate(
-                query=query,
-                doc_text=text,
-                lang=lang,
-            )
-
-            scored.append({
-                "doc_id": doc_id,
-                "score": score,
-                "text": text,
-            })
-
-        scored.sort(
-            key=lambda item: item["score"],
-            reverse=True,
-        )
-
-        return scored
-
-    # ==================================================================
-    # QUERY ENRICHMENT
-    # ==================================================================
-
-    def _build_enrichment(
-        self,
-        query: str,
-        domain: str,
-    ) -> Dict[str, Any]:
-        """
-        Extract query-level enrichment without changing the query.
-
-        Includes:
-
-            symbols
-            code terminology
-            directive
-            domain
-        """
-
-        enrichment: Dict[
-            str,
-            Any
-        ] = {
-            "symbols": [],
-            "code_terms": [],
-            "directive": detect_directive(
-                query
-            ),
-            "domain": domain,
-        }
-
-        # --------------------------------------------------------------
-        # SYMBOLS
-        # --------------------------------------------------------------
-
-        enrichment[
-            "symbols"
-        ] = recognize_symbols(
-            query,
-            domain,
-        )
-
-        # --------------------------------------------------------------
-        # CODE TERMS
-        # --------------------------------------------------------------
-
-        if domain == "code":
-
-            query_lower = query.lower()
-
-            for term, meaning in CODE_TERMS.items():
-
-                if term.lower() in query_lower:
-
-                    enrichment[
-                        "code_terms"
-                    ].append({
-                        "term": term,
-                        "meaning": meaning,
-                    })
-
-        return enrichment
-
-    # ==================================================================
-    # COMPLETE UNDERSTANDING
-    # ==================================================================
-
-    def understand(
-        self,
-        query: str,
-        lang: str = "en",
-    ) -> Dict[str, Any]:
-        """
-        Produce the complete structured understanding object.
-
-        This is the object that higher-level CoMpaNeoN components can
-        consume before prompt construction.
-
-        It contains:
-
-            context
-            tokens
-            symbols
-            directive
-            domain
-            language
-            code terms
-            route candidates
-
-        The memory routes remain explicitly visible so later ranking,
-        GridCV, and prompt-management layers can use them without
-        having to reconstruct how the query entered memory.
-        """
-
-        lang = normalize_lang(
-            lang
-        )
-
-        # --------------------------------------------------------------
-        # QUERY ANALYSIS
-        # --------------------------------------------------------------
-
-        tokens = tokenize(
-            query,
-            lang,
-        )
-
-        directive = detect_directive(
-            query
-        )
-
-        domain = detect_domain(
-            query
-        )
-
-        # --------------------------------------------------------------
-        # THREE-ROUTE RETRIEVAL
-        # --------------------------------------------------------------
-
-        routes = (
-            self._retrieve_three_routes(
-                query=query,
-                lang=lang,
-                limit=10,
-            )
-        )
-
-        # --------------------------------------------------------------
-        # CONTEXT
-        # --------------------------------------------------------------
-
-        context = self.get_context(
-            query,
-            lang,
-        )
-
-        # --------------------------------------------------------------
-        # ENRICHMENT
-        # --------------------------------------------------------------
-
-        enrichment = (
-            self._build_enrichment(
-                query=query,
-                domain=domain,
-            )
-        )
-
-        # --------------------------------------------------------------
-        # RETURN STRUCTURE
-        # --------------------------------------------------------------
-
-        return {
-            "query": query,
-
-            "context": context,
-
-            "tokens": tokens,
-
-            "routes": routes,
-
-            "symbols": enrichment[
-                "symbols"
-            ],
-
-            "code_terms": enrichment[
-                "code_terms"
-            ],
-
-            "directive": directive,
-
-            "domain": domain,
-
-            "language": lang,
-
-        }
+                quer
