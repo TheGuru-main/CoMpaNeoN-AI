@@ -1513,3 +1513,154 @@ class WebCrawler:
             query=query,
             **kwargs,
         )
+
+
+# ======================================================================
+    # SCHEDULING
+    # ======================================================================
+
+    def schedule(
+        self,
+        url: str,
+        source_type: Any = ContentType.NORMAL_WEB,
+        lang: str = "en",
+    ) -> Any:
+        """
+        Give a URL to CrawlerScheduler.
+
+        Scheduling remains outside the acquisition layer.
+        """
+
+        return self.scheduler.schedule(
+            url=url,
+            source_type=source_type,
+            lang=self._resolve_language(
+                lang
+            ),
+        )
+
+    # ======================================================================
+    # CRAWL MANY
+    # ======================================================================
+
+    def crawl_many(
+        self,
+        urls: List[str],
+        source_type: Any = ContentType.NORMAL_WEB,
+        lang: Optional[str] = None,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Crawl multiple URLs.
+
+        Scheduling/parallel execution remains the scheduler's
+        responsibility.
+        """
+
+        results = []
+
+        for url in urls:
+
+            results.append(
+                self.crawl(
+                    url=url,
+                    source_type=source_type,
+                    lang=lang,
+                )
+            )
+
+        return results
+
+    # ======================================================================
+    # SOURCE REGISTRY
+    # ======================================================================
+
+    def register_source(
+        self,
+        name: str,
+        adapter: Any,
+    ) -> None:
+        """
+        Register an additional external source adapter.
+
+        This allows external.py to grow without requiring the crawler
+        architecture itself to be rewritten.
+        """
+
+        key = (
+            str(name)
+            .strip()
+            .lower()
+        )
+
+        if not key:
+            raise ValueError(
+                "Source name cannot be empty."
+            )
+
+        if not callable(adapter):
+            raise TypeError(
+                "Source adapter must be callable."
+            )
+
+        self.external_sources[
+            key
+        ] = adapter
+
+    # ======================================================================
+    # SOURCE INFORMATION
+    # ======================================================================
+
+    def available_sources(
+        self,
+    ) -> List[str]:
+        """
+        Return registered external acquisition sources.
+        """
+
+        return sorted(
+            self.external_sources.keys()
+        )
+
+    # ======================================================================
+    # STATISTICS
+    # ======================================================================
+
+    def stats(
+        self,
+    ) -> Dict[str, Any]:
+        """
+        Return crawler acquisition statistics.
+        """
+
+        return {
+
+            "pages_crawled":
+                self.pages_crawled,
+
+            "pages_cached":
+                self.pages_cached,
+
+            "documents_indexed":
+                self.documents_indexed,
+
+            "tokens_indexed":
+                self.tokens_indexed,
+
+            "external_requests":
+                self.external_requests,
+
+            "external_documents":
+                self.external_documents,
+
+            "video_sources":
+                self.video_sources,
+
+            "transcripts_acquired":
+                self.transcripts_acquired,
+
+            "available_sources":
+                self.available_sources(),
+
+        }
