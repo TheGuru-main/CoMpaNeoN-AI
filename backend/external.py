@@ -855,4 +855,799 @@ async def fetch_wikipedia(
         try:
 
             response = await client.get(
-                sear
+                search_url,
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            search_results = response.json().get(
+                "query",
+                {}
+            ).get(
+                "search",
+                []
+            )
+
+            documents = []
+
+            for result in search_results:
+
+                title = result.get(
+                    "title",
+                    ""
+                )
+
+                try:
+
+                    summary_response = await client.get(
+                        f"{summary_base}{title}"
+                    )
+
+                    if summary_response.status_code != 200:
+                        continue
+
+                    data = summary_response.json()
+
+                    extract = data.get(
+                        "extract",
+                        ""
+                    )
+
+                    documents.append(
+                        normalize_document(
+                            source="wikipedia",
+                            source_type="encyclopedia",
+                            content=extract,
+                            title=title,
+                            url=(
+                                data.get(
+                                    "content_urls",
+                                    {}
+                                )
+                                .get(
+                                    "desktop",
+                                    {}
+                                )
+                                .get(
+                                    "page",
+                                    ""
+                                )
+                            ),
+                            external_id=title,
+                            metadata={
+                                "language": lang,
+                                "description": data.get(
+                                    "description"
+                                ),
+                            },
+                        )
+                    )
+
+                except Exception:
+                    continue
+
+            return {
+                "documents": documents
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# GITHUB
+# ============================================================================
+
+async def fetch_github_ebooks(
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+
+    token = os.getenv(
+        "GITHUB_TOKEN"
+    )
+
+    headers = {
+        "Accept": (
+            "application/vnd.github+json"
+        )
+    }
+
+    if token:
+        headers[
+            "Authorization"
+        ] = f"Bearer {token}"
+
+    source = get_source(
+        "github"
+    )
+
+    params = {
+        "q": f"{query} ebook",
+        "per_page": limit,
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                f"{source['base_url']}/search/repositories",
+                headers=headers,
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            items = response.json().get(
+                "items",
+                []
+            )
+
+            documents = []
+
+            for repo in items:
+
+                content = (
+                    repo.get(
+                        "description"
+                    )
+                    or ""
+                )
+
+                documents.append(
+                    normalize_document(
+                        source="github",
+                        source_type="repository",
+                        content=content,
+                        title=repo.get(
+                            "full_name",
+                            ""
+                        ),
+                        url=repo.get(
+                            "html_url",
+                            ""
+                        ),
+                        external_id=str(
+                            repo.get(
+                                "id"
+                            )
+                        ),
+                        metadata={
+                            "stars": repo.get(
+                                "stargazers_count"
+                            ),
+                            "language": repo.get(
+                                "language"
+                            ),
+                            "description": repo.get(
+                                "description"
+                            ),
+                        },
+                    )
+                )
+
+            return {
+                "documents": documents
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# CODE TEXTBOOK
+# ============================================================================
+
+async def fetch_code_textbook(
+    query: str,
+) -> Dict[str, Any]:
+
+    return await fetch_elibrary(
+        f"{query} programming"
+    )
+
+
+# ============================================================================
+# ALPHA VANTAGE
+# ============================================================================
+
+async def fetch_alphavantage(
+    symbol: str,
+) -> Dict[str, Any]:
+
+    api_key = os.getenv(
+        "ALPHA_VANTAGE_API_KEY"
+    )
+
+    if not api_key:
+        return {
+            "documents": [],
+            "note": (
+                "ALPHA_VANTAGE_API_KEY not set"
+            ),
+        }
+
+    source = get_source(
+        "alphavantage"
+    )
+
+    params = {
+        "function": "GLOBAL_QUOTE",
+        "symbol": symbol,
+        "apikey": api_key,
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                source["base_url"],
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            quote = response.json().get(
+                "Global Quote",
+                {}
+            )
+
+            content = str(
+                quote
+            )
+
+            return {
+                "documents": [
+                    normalize_document(
+                        source="alphavantage",
+                        source_type="financial",
+                        content=content,
+                        title=symbol,
+                        external_id=symbol,
+                        metadata={
+                            "quote": quote
+                        },
+                    )
+                ]
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# FINANCIAL MODELING PREP
+# ============================================================================
+
+async def fetch_financial_modelling_prep(
+    symbol: str,
+) -> Dict[str, Any]:
+
+    api_key = os.getenv(
+        "FMP_API_KEY"
+    )
+
+    if not api_key:
+        return {
+            "documents": [],
+            "note": (
+                "FMP_API_KEY not set"
+            ),
+        }
+
+    source = get_source(
+        "financial_modeling_prep"
+    )
+
+    url = (
+        f"{source['base_url']}/"
+        f"profile/{symbol}"
+    )
+
+    params = {
+        "apikey": api_key
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                url,
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            data = response.json()
+
+            profile = (
+                data[0]
+                if data
+                else {}
+            )
+
+            content = str(
+                profile
+            )
+
+            return {
+                "documents": [
+                    normalize_document(
+                        source=(
+                            "financial_modeling_prep"
+                        ),
+                        source_type="financial",
+                        content=content,
+                        title=symbol,
+                        external_id=symbol,
+                        metadata={
+                            "profile": profile
+                        },
+                    )
+                ]
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# YOUTUBE
+# ============================================================================
+
+async def fetch_youtube_videos(
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+    """
+    Search YouTube and return normalized video documents.
+
+    This retrieves metadata through the YouTube Data API.
+
+    Transcript/subtitle acquisition is intentionally a separate step.
+    web_crawler.py can decide whether transcript retrieval is required.
+    """
+
+    api_key = os.getenv(
+        "YOUTUBE_API_KEY"
+    )
+
+    if not api_key:
+        return {
+            "documents": [],
+            "note": (
+                "YOUTUBE_API_KEY not set"
+            ),
+        }
+
+    source = get_source(
+        "youtube"
+    )
+
+    params = {
+        "part": "snippet",
+        "q": query,
+        "type": "video",
+        "maxResults": limit,
+        "key": api_key,
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                f"{source['base_url']}/search",
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            items = response.json().get(
+                "items",
+                []
+            )
+
+            documents = []
+
+            for item in items:
+
+                video_id = (
+                    item.get(
+                        "id",
+                        {}
+                    ).get(
+                        "videoId"
+                    )
+                )
+
+                snippet = item.get(
+                    "snippet",
+                    {}
+                )
+
+                title = snippet.get(
+                    "title",
+                    ""
+                )
+
+                description = snippet.get(
+                    "description",
+                    ""
+                )
+
+                content = (
+                    f"{title}\n"
+                    f"{description}"
+                )
+
+                documents.append(
+                    normalize_document(
+                        source="youtube",
+                        source_type="video",
+                        content=content,
+                        title=title,
+                        url=(
+                            f"https://www.youtube.com/"
+                            f"watch?v={video_id}"
+                        ),
+                        external_id=video_id,
+                        metadata={
+                            "channel_id": snippet.get(
+                                "channelId"
+                            ),
+                            "channel_title": snippet.get(
+                                "channelTitle"
+                            ),
+                            "published_at": snippet.get(
+                                "publishedAt"
+                            ),
+                            "thumbnails": snippet.get(
+                                "thumbnails",
+                                {}
+                            ),
+                            "transcript_available": False,
+                            "subtitles_available": False,
+                        },
+                    )
+                )
+
+            return {
+                "documents": documents
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# YOUTUBE VIDEO METADATA
+# ============================================================================
+
+async def fetch_youtube_metadata(
+    video_id: str,
+) -> Dict[str, Any]:
+    """
+    Fetch detailed metadata for one YouTube video.
+    """
+
+    api_key = os.getenv(
+        "YOUTUBE_API_KEY"
+    )
+
+    if not api_key:
+        return {
+            "documents": [],
+            "note": (
+                "YOUTUBE_API_KEY not set"
+            ),
+        }
+
+    source = get_source(
+        "youtube"
+    )
+
+    params = {
+        "part": (
+            "snippet,"
+            "contentDetails,"
+            "statistics"
+        ),
+        "id": video_id,
+        "key": api_key,
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                f"{source['base_url']}/videos",
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": []
+                }
+
+            items = response.json().get(
+                "items",
+                []
+            )
+
+            if not items:
+                return {
+                    "documents": []
+                }
+
+            item = items[0]
+
+            snippet = item.get(
+                "snippet",
+                {}
+            )
+
+            content_details = item.get(
+                "contentDetails",
+                {}
+            )
+
+            statistics = item.get(
+                "statistics",
+                {}
+            )
+
+            title = snippet.get(
+                "title",
+                ""
+            )
+
+            description = snippet.get(
+                "description",
+                ""
+            )
+
+            content = (
+                f"{title}\n"
+                f"{description}"
+            )
+
+            return {
+                "documents": [
+                    normalize_document(
+                        source="youtube",
+                        source_type="video",
+                        content=content,
+                        title=title,
+                        url=(
+                            f"https://www.youtube.com/"
+                            f"watch?v={video_id}"
+                        ),
+                        external_id=video_id,
+                        metadata={
+                            "channel_id": snippet.get(
+                                "channelId"
+                            ),
+                            "channel_title": snippet.get(
+                                "channelTitle"
+                            ),
+                            "published_at": snippet.get(
+                                "publishedAt"
+                            ),
+                            "duration": content_details.get(
+                                "duration"
+                            ),
+                            "definition": content_details.get(
+                                "definition"
+                            ),
+                            "statistics": statistics,
+                            "caption_flag": content_details.get(
+                                "caption"
+                            ),
+                        },
+                    )
+                ]
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# APITUBE
+# ============================================================================
+
+async def fetch_apitube_videos(
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+) -> Dict[str, Any]:
+    """
+    APITube video/media discovery adapter.
+
+    The exact API route may vary according to the APITube account/product
+    being used. Therefore the endpoint is configurable through:
+
+        APITUBE_API_BASE_URL
+
+    rather than being permanently embedded into the crawler.
+    """
+
+    api_key = os.getenv(
+        "APITUBE_API_KEY"
+    )
+
+    if not api_key:
+        return {
+            "documents": [],
+            "note": (
+                "APITUBE_API_KEY not set"
+            ),
+        }
+
+    base_url = os.getenv(
+        "APITUBE_API_BASE_URL",
+        "https://api.apitube.io",
+    )
+
+    endpoint = os.getenv(
+        "APITUBE_VIDEO_SEARCH_PATH",
+        "/v1/videos/search",
+    )
+
+    params = {
+        "q": query,
+        "limit": limit,
+        "api_key": api_key,
+    }
+
+    async with _client() as client:
+
+        try:
+
+            response = await client.get(
+                f"{base_url.rstrip('/')}"
+                f"/{endpoint.lstrip('/')}",
+                params=params,
+            )
+
+            if response.status_code != 200:
+                return {
+                    "documents": [],
+                    "error": (
+                        f"HTTP "
+                        f"{response.status_code}"
+                    ),
+                }
+
+            data = response.json()
+
+            items = (
+                data.get("results")
+                or data.get("items")
+                or data.get("videos")
+                or []
+            )
+
+            documents = []
+
+            for item in items:
+
+                title = (
+                    item.get("title")
+                    or ""
+                )
+
+                description = (
+                    item.get(
+                        "description"
+                    )
+                    or ""
+                )
+
+                url = (
+                    item.get("url")
+                    or item.get(
+                        "web_url"
+                    )
+                    or ""
+                )
+
+                external_id = (
+                    item.get("id")
+                    or item.get(
+                        "video_id"
+                    )
+                )
+
+                content = (
+                    f"{title}\n"
+                    f"{description}"
+                )
+
+                documents.append(
+                    normalize_document(
+                        source="apitube",
+                        source_type="video",
+                        content=content,
+                        title=title,
+                        url=url,
+                        external_id=(
+                            str(external_id)
+                            if external_id
+                            else None
+                        ),
+                        metadata={
+                            "raw_provider": item,
+                            "transcript_available": bool(
+                                item.get(
+                                    "transcript"
+                                )
+                            ),
+                            "subtitles_available": bool(
+                                item.get(
+                                    "subtitles"
+                                )
+                            ),
+                        },
+                    )
+                )
+
+            return {
+                "documents": documents
+            }
+
+        except Exception as exc:
+
+            return {
+                "documents": [],
+                "error": str(exc),
+            }
+
+
+# ============================================================================
+# VIDEO TRANSCRIPT NORMALIZATION
+# ===================================================
