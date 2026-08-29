@@ -868,4 +868,219 @@ class CrawlerRetrieval:
         )
 
         if not candidates:
-            return
+            return []
+
+        # --------------------------------------------------------------
+        # DATA MIXER
+        # --------------------------------------------------------------
+
+        mixed = (
+            self._mix_candidates(
+                query=query,
+                candidates=candidates,
+                analysis=analysis,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # RANK
+        # --------------------------------------------------------------
+
+        ranked = (
+            self._rank_candidates(
+                query=query,
+                candidates=mixed,
+                lang=lang,
+                analysis=analysis,
+            )
+        )
+
+        return ranked[:limit]
+
+    # ==================================================================
+    # RETRIEVE CONTEXT
+    # ==================================================================
+
+    def retrieve_context(
+        self,
+        query: str,
+        lang: str = "en",
+        limit: int = 10,
+        context_limit: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Return retrieval together with structured query analysis.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        results = self.retrieve(
+            query=query,
+            lang=lang,
+            limit=limit,
+        )
+
+        analysis = (
+            self._analyze_query(
+                query,
+                lang,
+            )
+        )
+
+        directive = detect_directive(
+            query
+        )
+
+        context = "\n".join(
+            result["text"]
+            for result in results[
+                :context_limit
+            ]
+        )
+
+        return {
+            "query": query,
+
+            "language": lang,
+
+            "intent": analysis.get(
+                "intent",
+                "general",
+            ),
+
+            "domain": analysis.get(
+                "domain",
+                "general",
+            ),
+
+            "entities": analysis.get(
+                "entities",
+                [],
+            ),
+
+            "directive": directive,
+
+            "results": results,
+
+            "context": context,
+        }
+
+    # ==================================================================
+    # ENTRY POINT INSPECTION
+    # ==================================================================
+
+    def inspect_entry_points(
+        self,
+        query: str,
+        lang: str = "en",
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Inspect where each query token enters the MemoryGrid.
+
+        Useful for debugging the retrieval architecture.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        positions = (
+            self._build_positions(
+                tokens
+            )
+        )
+
+        return positions
+
+    # ==================================================================
+    # RETRIEVAL TRACE
+    # ==================================================================
+
+    def retrieval_trace(
+        self,
+        query: str,
+        lang: str = "en",
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Return the complete deterministic retrieval trace.
+
+        This is useful for debugging, GridCV and later project-trace
+        memory.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        tokens = tokenize(
+            query,
+            lang,
+        )
+
+        analysis = (
+            self._analyze_query(
+                query,
+                lang,
+            )
+        )
+
+        positions = (
+            self._build_positions(
+                tokens
+            )
+        )
+
+        per_entry_limit = max(
+            1,
+            limit
+            // max(
+                len(positions),
+                1,
+            ),
+        )
+
+        candidates = (
+            self._collect_candidates(
+                positions,
+                per_entry_limit,
+            )
+        )
+
+        ranked = self._rank_candidates(
+            query=query,
+            candidates=list(
+                candidates.values()
+            ),
+            lang=lang,
+            analysis=analysis,
+        )
+
+        return {
+            "query": query,
+
+            "language": lang,
+
+            "tokens": tokens,
+
+            "analysis": analysis,
+
+            "entry_points": positions,
+
+            "candidate_count": len(
+                candidates
+            ),
+
+            "ranked": ranked[
+                :limit
+            ],
+        }
