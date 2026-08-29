@@ -866,4 +866,128 @@ class WordUnderstanding:
             )
 
             score_result = score_candidate(
-                quer
+                query=query,
+                candidate_text=doc["text"],
+                query_entities=[],
+                query_hierarchy=domain,
+                candidate_entities=[],
+                candidate_hierarchy=domain,
+                freshness_score=0.0,
+                lang=lang,
+            )
+
+            ranked.append({
+                "doc_id": doc["doc_id"],
+                "text": doc["text"],
+                "score": score_result[
+                    "total"
+                ],
+                "scores": score_result[
+                    "scores"
+                ],
+                "routes": route_names,
+            })
+
+        ranked.sort(
+            key=lambda item: item["score"],
+            reverse=True,
+        )
+
+        # -------------------------------------------------------------
+        # WORDCHAIN
+        # -------------------------------------------------------------
+
+        self._feed_ranked_documents(
+            ranked[:10]
+        )
+
+        word_chain_result = (
+            self._query_word_chain(
+                query=query,
+                limit=5,
+            )
+        )
+
+        # -------------------------------------------------------------
+        # CONTEXT
+        # -------------------------------------------------------------
+
+        context = "\n".join(
+            item["text"]
+            for item in ranked[:3]
+        )
+
+        # -------------------------------------------------------------
+        # ENRICHMENT
+        # -------------------------------------------------------------
+
+        enrichment = (
+            self._build_enrichment(
+                query=query,
+                domain=domain,
+            )
+        )
+
+        # -------------------------------------------------------------
+        # RETURN
+        # -------------------------------------------------------------
+
+        return {
+            "query": query,
+
+            "context": context,
+
+            "tokens": tokens,
+
+            "routes": routes,
+
+            "ranked_documents": ranked[:10],
+
+            "word_chain": {
+                "predictions": word_chain_result[
+                    "predictions"
+                ],
+                "pairs": word_chain_result[
+                    "pairs"
+                ],
+                "profile": word_chain_result[
+                    "profile"
+                ],
+            },
+
+            "symbols": enrichment[
+                "symbols"
+            ],
+
+            "code_terms": enrichment[
+                "code_terms"
+            ],
+
+            "directive": directive,
+
+            "domain": domain,
+
+            "language": lang,
+        }
+
+
+# =====================================================================
+# FACTORY
+# =====================================================================
+
+def create_word_understanding(
+    memory_grid: MemoryGrid,
+    word_chain: Optional[WordChain] = None,
+) -> WordUnderstanding:
+    """
+    Create a WordUnderstanding instance.
+
+    A persistent WordChain can be supplied by the application so that
+    personal or organization-specific linguistic knowledge remains
+    available across sessions.
+    """
+
+    return WordUnderstanding(
+        memory_grid=memory_grid,
+        word_chain=word_chain,
+    )
