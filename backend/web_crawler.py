@@ -741,4 +741,775 @@ class WebCrawler:
             MemoryGrid
         """
 
-        requested
+        requested_lang = (
+            self._resolve_language(lang)
+            if lang
+            else None
+        )
+
+        # --------------------------------------------------------------
+        # CACHE
+        # --------------------------------------------------------------
+
+        cached_data, cached_hash = (
+            self.page_cache.get(url)
+        )
+
+        if cached_data is not None:
+
+            self.pages_cached += 1
+
+            return {
+                "url": url,
+                "cached": True,
+                "changed": False,
+                "language": (
+                    requested_lang
+                    or self.detect_language(
+                        cached_data
+                    )
+                ),
+                "text": cached_data,
+                "content_hash": cached_hash,
+                "indexed": False,
+            }
+
+        # --------------------------------------------------------------
+        # FETCH
+        # --------------------------------------------------------------
+
+        try:
+
+            text = self.fetch_text(
+                url
+            )
+
+        except Exception as exc:
+
+            return {
+                "url": url,
+                "cached": False,
+                "changed": False,
+                "indexed": False,
+                "error": str(exc),
+            }
+
+        if not text:
+
+            return {
+                "url": url,
+                "cached": False,
+                "changed": False,
+                "indexed": False,
+                "text": "",
+            }
+
+        self.pages_crawled += 1
+
+        text = self.normalize_text(
+            text
+        )
+
+        # --------------------------------------------------------------
+        # CHECKSUM
+        # --------------------------------------------------------------
+
+        checksum = self.content_hash(
+            text
+        )
+
+        # --------------------------------------------------------------
+        # CHANGE DETECTION
+        # --------------------------------------------------------------
+
+        changed = (
+            self.page_cache.has_changed(
+                url,
+                text,
+            )
+        )
+
+        if not changed:
+
+            self.page_cache.set(
+                url,
+                checksum,
+                text,
+            )
+
+            return {
+                "url": url,
+                "cached": False,
+                "changed": False,
+                "language": (
+                    requested_lang
+                    or self.detect_language(
+                        text
+                    )
+                ),
+                "text": text,
+                "content_hash": checksum,
+                "indexed": False,
+            }
+
+        resolved_lang = (
+            requested_lang
+            or self.detect_language(
+                text
+            )
+        )
+
+        # --------------------------------------------------------------
+        # METADATA
+        # --------------------------------------------------------------
+
+        metadata = self.build_metadata(
+            url=url,
+            source_type=str(
+                source_type
+            ),
+            lang=resolved_lang,
+            content_hash=checksum,
+            content_type="text/html",
+        )
+
+        # --------------------------------------------------------------
+        # MEMORYGRID
+        # --------------------------------------------------------------
+
+        indexed = self.acquire_document(
+            text,
+            url=url,
+            lang=resolved_lang,
+            source_type=str(
+                source_type
+            ),
+            metadata=metadata,
+        )
+
+        # --------------------------------------------------------------
+        # CACHE
+        # --------------------------------------------------------------
+
+        self.page_cache.set(
+            url,
+            checksum,
+            text,
+        )
+
+        return {
+            "url": url,
+            "cached": False,
+            "changed": True,
+            "language": resolved_lang,
+            "text": text,
+            "content_hash": checksum,
+            "indexed": indexed.get(
+                "indexed",
+                False,
+            ),
+            "doc_id": indexed.get(
+                "doc_id"
+            ),
+            "token_count": indexed.get(
+                "token_count",
+                0,
+            ),
+        }
+
+    # ======================================================================
+    # EXTERNAL SOURCE DISPATCH
+    # ======================================================================
+
+    async def acquire_external(
+        self,
+        source: str,
+        query: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Acquire knowledge from an adapter defined by external.py.
+
+        Example:
+
+            await crawler.acquire_external(
+                "wikipedia",
+                "quantum mechanics",
+            )
+
+        The external adapter determines HOW to communicate with the
+        external API.
+
+        WebCrawler determines HOW the returned information enters
+        MemoryGrid.
+        """
+
+        source_key = (
+            str(source)
+            .strip()
+            .lower()
+        )
+
+        adapter = self.external_sources.get(
+            source_key
+        )
+
+        if adapter is None:
+
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": (
+                    "No external adapter "
+                    f"registered for {source_key}"
+                ),
+            }
+
+        if not callable(adapter):
+
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": (
+                    f"Adapter unavailable: "
+                    f"{source_key}"
+                ),
+            }
+
+        self.external_requests += 1
+
+        try:
+
+            result = await adapter(
+                query,
+                **kwargs,
+            )
+
+        except TypeError:
+
+            # Some adapters accept only the primary query.
+            result = await adapter(
+                query
+            )
+
+        except Exception as exc:
+
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": str(exc),
+            }
+
+        documents = (
+            self._extract_external_documents(
+                result
+            )
+        )
+
+        indexed_documents = []
+
+        for document in documents:
+
+            text = document.get(
+                "text",
+                ""
+            )
+
+            if not text:
+                continue
+
+            metadata = document.get(
+                "metadata",
+                {}
+            )
+
+            indexed = self.acquire_document(
+                text=text,
+                url=document.get(
+                    "url",
+                    ""
+                ),
+                lang=document.get(
+                    "language"
+                ),
+                source_type=source_key,
+                metadata=metadata,
+            )
+
+            indexed_documents.append(
+                indexed
+            )
+
+        self.external_documents += (
+            len(indexed_documents)
+        )
+
+        return {
+            "source": source_key,
+            "query": query,
+            "documents": indexed_documents,
+            "document_count": len(
+                indexed_documents
+            ),
+            "indexed": bool(
+                indexed_documents
+            ),
+        }
+
+    # ======================================================================
+    # EXTERNAL RESULT NORMALIZATION
+    # ======================================================================
+
+    def _extract_external_documents(
+        self,
+        result: Any,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Convert different API response shapes into one crawler
+        document representation.
+
+        This prevents each external API from creating its own storage
+        pipeline.
+        """
+
+        documents: List[
+            Dict[str, Any]
+        ] = []
+
+        if result is None:
+            return documents
+
+        # --------------------------------------------------------------
+        # Dictionary response
+        # --------------------------------------------------------------
+
+        if isinstance(result, dict):
+
+            # Generic text response.
+            if result.get("text"):
+
+                documents.append({
+                    "text": result["text"],
+                    "url": result.get(
+                        "url",
+                        ""
+                    ),
+                    "language": result.get(
+                        "language"
+                    ),
+                    "metadata": result.get(
+                        "metadata",
+                        {}
+                    ),
+                })
+
+            # Wikipedia / news style.
+            for key in (
+                "articles",
+                "ebooks",
+                "books",
+                "elibrary",
+                "code_books",
+            ):
+
+                items = result.get(
+                    key,
+                    []
+                )
+
+                if not isinstance(
+                    items,
+                    list,
+                ):
+                    continue
+
+                for item in items:
+
+                    if not isinstance(
+                        item,
+                        dict,
+                    ):
+                        continue
+
+                    text_parts = []
+
+                    for field in (
+                        "title",
+                        "description",
+                        "extract",
+                        "summary",
+                        "content",
+                        "text",
+                        "author",
+                    ):
+
+                        value = item.get(
+                            field
+                        )
+
+                        if value:
+                            text_parts.append(
+                                str(value)
+                            )
+
+                    if not text_parts:
+                        continue
+
+                    documents.append({
+                        "text": "\n".join(
+                            text_parts
+                        ),
+                        "url": (
+                            item.get("url")
+                            or item.get(
+                                "infoLink",
+                                ""
+                            )
+                        ),
+                        "language": (
+                            item.get(
+                                "language"
+                            )
+                        ),
+                        "metadata": {
+                            "external_record": item
+                        },
+                    })
+
+            # ----------------------------------------------------------
+            # Video result
+            # ----------------------------------------------------------
+
+            videos = result.get(
+                "videos",
+                []
+            )
+
+            if isinstance(
+                videos,
+                list,
+            ):
+
+                for video in videos:
+
+                    if not isinstance(
+                        video,
+                        dict,
+                    ):
+                        continue
+
+                    documents.extend(
+                        self._video_to_documents(
+                            video
+                        )
+                    )
+
+            # ----------------------------------------------------------
+            # Transcript result
+            # ----------------------------------------------------------
+
+            transcript = result.get(
+                "transcript"
+            )
+
+            if transcript:
+
+                documents.append({
+                    "text": str(
+                        transcript
+                    ),
+                    "url": result.get(
+                        "url",
+                        ""
+                    ),
+                    "language": result.get(
+                        "language"
+                    ),
+                    "metadata": {
+                        "content_type": (
+                            "video_transcript"
+                        ),
+                        "transcript": True,
+                    },
+                })
+
+        # --------------------------------------------------------------
+        # List response
+        # --------------------------------------------------------------
+
+        elif isinstance(
+            result,
+            list,
+        ):
+
+            for item in result:
+
+                documents.extend(
+                    self._extract_external_documents(
+                        item
+                    )
+                )
+
+        return documents
+
+    # ======================================================================
+    # VIDEO NORMALIZATION
+    # ======================================================================
+
+    def _video_to_documents(
+        self,
+        video: Dict[str, Any],
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Convert video metadata and transcript/subtitle material into
+        MemoryGrid documents.
+        """
+
+        self.video_sources += 1
+
+        documents = []
+
+        title = video.get(
+            "title",
+            ""
+        )
+
+        description = video.get(
+            "description",
+            ""
+        )
+
+        url = (
+            video.get("url")
+            or video.get(
+                "video_url",
+                ""
+            )
+        )
+
+        language = video.get(
+            "language"
+        )
+
+        metadata = {
+            "content_type": "video",
+            "video_id": video.get(
+                "id"
+            ),
+            "channel": video.get(
+                "channel"
+            ),
+            "author": video.get(
+                "author"
+            ),
+            "published_at": video.get(
+                "published_at"
+            ),
+            "duration": video.get(
+                "duration"
+            ),
+            "thumbnail": video.get(
+                "thumbnail"
+            ),
+        }
+
+        # --------------------------------------------------------------
+        # Video metadata itself
+        # --------------------------------------------------------------
+
+        metadata_text = "\n".join(
+            part
+            for part in (
+                title,
+                description,
+            )
+            if part
+        )
+
+        if metadata_text:
+
+            documents.append({
+                "text": metadata_text,
+                "url": url,
+                "language": language,
+                "metadata": metadata,
+            })
+
+        # --------------------------------------------------------------
+        # Subtitles
+        # --------------------------------------------------------------
+
+        subtitles = video.get(
+            "subtitles"
+        )
+
+        if subtitles:
+
+            subtitle_text = (
+                self._normalize_subtitles(
+                    subtitles
+                )
+            )
+
+            if subtitle_text:
+
+                self.transcripts_acquired += 1
+
+                documents.append({
+                    "text": subtitle_text,
+                    "url": url,
+                    "language": language,
+                    "metadata": {
+                        **metadata,
+                        "content_type": (
+                            "video_subtitles"
+                        ),
+                        "subtitles": True,
+                    },
+                })
+
+        # --------------------------------------------------------------
+        # Transcript
+        # --------------------------------------------------------------
+
+        transcript = video.get(
+            "transcript"
+        )
+
+        if transcript:
+
+            self.transcripts_acquired += 1
+
+            documents.append({
+                "text": str(
+                    transcript
+                ),
+                "url": url,
+                "language": language,
+                "metadata": {
+                    **metadata,
+                    "content_type": (
+                        "video_transcript"
+                    ),
+                    "transcript": True,
+                },
+            })
+
+        return documents
+
+    # ======================================================================
+    # SUBTITLE NORMALIZATION
+    # ======================================================================
+
+    def _normalize_subtitles(
+        self,
+        subtitles: Any,
+    ) -> str:
+        """
+        Normalize common subtitle structures.
+
+        Supports:
+
+            string
+            list of strings
+            list of dictionaries
+        """
+
+        if isinstance(
+            subtitles,
+            str,
+        ):
+            return self.normalize_text(
+                subtitles
+            )
+
+        if not isinstance(
+            subtitles,
+            list,
+        ):
+            return ""
+
+        lines = []
+
+        for item in subtitles:
+
+            if isinstance(
+                item,
+                str,
+            ):
+
+                lines.append(
+                    item
+                )
+
+            elif isinstance(
+                item,
+                dict,
+            ):
+
+                text = (
+                    item.get("text")
+                    or item.get(
+                        "caption"
+                    )
+                    or item.get(
+                        "content"
+                    )
+                )
+
+                if text:
+                    lines.append(
+                        str(text)
+                    )
+
+        return self.normalize_text(
+            " ".join(lines)
+        )
+
+    # ======================================================================
+    # YOUTUBE
+    # ======================================================================
+
+    async def crawl_youtube(
+        self,
+        query: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Acquire YouTube material through external.py.
+
+        The YouTube adapter handles the external API/source mechanics.
+        WebCrawler handles normalization and MemoryGrid ingestion.
+        """
+
+        return await self.acquire_external(
+            source="youtube",
+            query=query,
+            **kwargs,
+        )
+
+    # ======================================================================
+    # APITUBE
+    # ======================================================================
+
+    async def crawl_apitube(
+        self,
+        query: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Acquire video material through ApiTube.
+        """
+
+        return await self.acquire_external(
+            source="apitube",
+            query=query,
+            **kwargs,
+        )
