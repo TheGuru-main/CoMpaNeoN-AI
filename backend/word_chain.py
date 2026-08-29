@@ -821,3 +821,862 @@ class WordChain:
             })
 
         return result
+
+# -------------------------------------------------------------------
+    # PHRASE CONTINUATION
+    # -------------------------------------------------------------------
+
+    def next_words_from_phrase(
+        self,
+        phrase: str,
+        limit: int = 5,
+        source: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+
+        words = linguistic_words(
+            phrase
+        )
+
+        if len(words) < 2:
+            words = clean_words(
+                phrase
+            )
+
+        if len(words) < 2:
+            return []
+
+        key = (
+            f"{words[-2]}_{words[-1]}"
+        )
+
+        if source:
+
+            source = self.normalize_source(
+                source
+            )
+
+            counter = (
+                self.source_chains[
+                    source
+                ]["phrases"].get(
+                    key,
+                    Counter(),
+                )
+            )
+
+        else:
+
+            counter = (
+                self.phrase_chains.get(
+                    key,
+                    Counter(),
+                )
+            )
+
+        total = sum(
+            counter.values()
+        )
+
+        return [
+            {
+                "word": next_word,
+                "after_phrase": key,
+                "count": count,
+                "probability": self._probability(
+                    count,
+                    total,
+                ),
+                "source": source,
+            }
+            for next_word, count
+            in counter.most_common(limit)
+        ]
+
+    # -------------------------------------------------------------------
+    # ALPHABET MATRIX SIGNAL
+    # -------------------------------------------------------------------
+
+    def alphabet_relationship(
+        self,
+        word: str,
+    ) -> Dict[str, Any]:
+        """
+        Return the relationship-matrix representation of a word.
+        """
+
+        try:
+
+            return {
+                "word": word,
+                "relationships": (
+                    get_word_relationships(
+                        word
+                    )
+                ),
+                "classes": (
+                    get_word_relationship_classes(
+                        word
+                    )
+                ),
+                "signature": (
+                    relationship_signature(
+                        word
+                    )
+                ),
+            }
+
+        except Exception:
+
+            return {
+                "word": word,
+                "relationships": [],
+                "classes": [],
+                "signature": (),
+            }
+
+    # -------------------------------------------------------------------
+    # WORD RELATIONSHIP
+    # -------------------------------------------------------------------
+
+    def relationship_between_words(
+        self,
+        word_a: str,
+        word_b: str,
+    ) -> float:
+
+        try:
+
+            return relationship_score(
+                word_a,
+                word_b,
+            )
+
+        except Exception:
+
+            return 0.0
+
+    # -------------------------------------------------------------------
+    # PREDICT FROM TEXT
+    # -------------------------------------------------------------------
+
+    def predict_from_text(
+        self,
+        text: str,
+        limit: int = 5,
+        source: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+
+        words = linguistic_words(text)
+
+        if not words:
+            words = clean_words(text)
+
+        if not words:
+            return []
+
+        if len(words) >= 2:
+
+            results = (
+                self.next_words_from_phrase(
+                    f"{words[-2]} {words[-1]}",
+                    limit=limit,
+                    source=source,
+                )
+            )
+
+            if results:
+                return results
+
+        return self.next_words(
+            words[-1],
+            limit=limit,
+            source=source,
+        )
+
+    # -------------------------------------------------------------------
+    # PHRASE CONTINUITY
+    # -------------------------------------------------------------------
+
+    def phrase_continuity(
+        self,
+        query: str,
+        candidate_text: str,
+    ) -> float:
+
+        query_words = linguistic_words(
+            query
+        )
+
+        candidate_words = linguistic_words(
+            candidate_text
+        )
+
+        if not query_words:
+            query_words = clean_words(
+                query
+            )
+
+        if not candidate_words:
+            candidate_words = clean_words(
+                candidate_text
+            )
+
+        if not query_words or not candidate_words:
+            return 0.0
+
+        longest = 0
+
+        for start in range(
+            len(query_words)
+        ):
+
+            for candidate_start in range(
+                len(candidate_words)
+            ):
+
+                current = 0
+
+                while (
+                    start + current
+                    < len(query_words)
+                    and
+                    candidate_start + current
+                    < len(candidate_words)
+                    and
+                    query_words[
+                        start + current
+                    ]
+                    ==
+                    candidate_words[
+                        candidate_start + current
+                    ]
+                ):
+                    current += 1
+
+                longest = max(
+                    longest,
+                    current,
+                )
+
+        return (
+            longest
+            / len(query_words)
+        ) * 100.0
+
+    # -------------------------------------------------------------------
+    # WORD PAIR OVERLAP
+    # -------------------------------------------------------------------
+
+    def pair_overlap(
+        self,
+        query: str,
+        candidate_text: str,
+    ) -> float:
+
+        query_words = linguistic_words(
+            query
+        )
+
+        candidate_words = linguistic_words(
+            candidate_text
+        )
+
+        if len(query_words) < 2:
+            query_words = clean_words(
+                query
+            )
+
+        if len(candidate_words) < 2:
+            candidate_words = clean_words(
+                candidate_text
+            )
+
+        if len(query_words) < 2:
+            return 0.0
+
+        query_pairs = {
+            f"{query_words[i]}_{query_words[i + 1]}"
+            for i in range(
+                len(query_words) - 1
+            )
+        }
+
+        candidate_pairs = {
+            f"{candidate_words[i]}_{candidate_words[i + 1]}"
+            for i in range(
+                len(candidate_words) - 1
+            )
+        }
+
+        if not query_pairs:
+            return 0.0
+
+        matched = len(
+            query_pairs
+            & candidate_pairs
+        )
+
+        return (
+            matched
+            / len(query_pairs)
+        ) * 100.0
+
+    # -------------------------------------------------------------------
+    # SOURCE COMPARISON
+    # -------------------------------------------------------------------
+
+    def compare_sources(
+        self,
+        word: str,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+
+        result = {}
+
+        for source in (
+            self.source_chains.keys()
+        ):
+
+            result[source] = (
+                self.next_words(
+                    word,
+                    limit=limit,
+                    source=source,
+                )
+            )
+
+        return result
+
+    # -------------------------------------------------------------------
+    # KNOWLEDGE PROFILE
+    # -------------------------------------------------------------------
+
+    def knowledge_profile(
+        self,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        if source:
+
+            source = self.normalize_source(
+                source
+            )
+
+            chain = (
+                self.source_chains[
+                    source
+                ]
+            )
+
+            return {
+                "source": source,
+                "unique_words": len(
+                    chain["words"]
+                ),
+                "unique_pairs": len(
+                    chain["pairs"]
+                ),
+                "unique_transitions": len(
+                    chain["transitions"]
+                ),
+                "documents": (
+                    self.source_statistics[
+                        source
+                    ]["documents"]
+                ),
+                "words": (
+                    self.source_statistics[
+                        source
+                    ]["words"]
+                ),
+                "pairs": (
+                    self.source_statistics[
+                        source
+                    ]["pairs"]
+                ),
+                "languages": dict(
+                    chain["languages"]
+                ),
+                "relationship_classes": dict(
+                    chain[
+                        "relationship_classes"
+                    ]
+                ),
+            }
+
+        return {
+            "unique_words": len(
+                self.word_frequency
+            ),
+            "unique_pairs": len(
+                self.pairs
+            ),
+            "unique_transitions": len(
+                self.transitions
+            ),
+            "languages": {
+                language: dict(
+                    stats
+                )
+                for language, stats
+                in self.language_statistics.items()
+            },
+            "sources": {
+                source: dict(stats)
+                for source, stats
+                in self.source_statistics.items()
+            },
+        }
+
+    # -------------------------------------------------------------------
+    # SERIALIZATION
+    # -------------------------------------------------------------------
+
+    def to_dict(
+        self,
+    ) -> Dict[str, Any]:
+
+        source_chains = {}
+
+        for source, chain in (
+            self.source_chains.items()
+        ):
+
+            source_chains[source] = {
+                "words": dict(
+                    chain["words"]
+                ),
+                "pairs": dict(
+                    chain["pairs"]
+                ),
+                "transitions": {
+                    word: dict(counter)
+                    for word, counter
+                    in chain[
+                        "transitions"
+                    ].items()
+                },
+                "phrases": {
+                    phrase: dict(counter)
+                    for phrase, counter
+                    in chain[
+                        "phrases"
+                    ].items()
+                },
+                "relationship_classes": dict(
+                    chain[
+                        "relationship_classes"
+                    ]
+                ),
+                "languages": dict(
+                    chain["languages"]
+                ),
+            }
+
+        return {
+            "word_frequency": dict(
+                self.word_frequency
+            ),
+            "pairs": dict(
+                self.pairs
+            ),
+            "transitions": {
+                word: dict(counter)
+                for word, counter
+                in self.transitions.items()
+            },
+            "phrase_chains": {
+                phrase: dict(counter)
+                for phrase, counter
+                in self.phrase_chains.items()
+            },
+            "source_statistics": {
+                source: dict(stats)
+                for source, stats
+                in self.source_statistics.items()
+            },
+            "language_statistics": {
+                language: dict(stats)
+                for language, stats
+                in self.language_statistics.items()
+            },
+            "source_chains": source_chains,
+        }
+
+    # -------------------------------------------------------------------
+    # DESERIALIZATION
+    # -------------------------------------------------------------------
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+    ) -> "WordChain":
+
+        chain = cls()
+
+        chain.word_frequency.update(
+            data.get(
+                "word_frequency",
+                {},
+            )
+        )
+
+        chain.pairs.update(
+            data.get(
+                "pairs",
+                {},
+            )
+        )
+
+        for word, values in data.get(
+            "transitions",
+            {},
+        ).items():
+
+            chain.transitions[
+                word
+            ].update(values)
+
+        for phrase, values in data.get(
+            "phrase_chains",
+            {},
+        ).items():
+
+            chain.phrase_chains[
+                phrase
+            ].update(values)
+
+        for source, values in data.get(
+            "source_statistics",
+            {},
+        ).items():
+
+            chain.source_statistics[
+                source
+            ].update(values)
+
+        for language, values in data.get(
+            "language_statistics",
+            {},
+        ).items():
+
+            chain.language_statistics[
+                language
+            ].update(values)
+
+        for source, values in data.get(
+            "source_chains",
+            {},
+        ).items():
+
+            source_chain = (
+                chain.source_chains[
+                    source
+                ]
+            )
+
+            source_chain[
+                "words"
+            ].update(
+                values.get(
+                    "words",
+                    {},
+                )
+            )
+
+            source_chain[
+                "pairs"
+            ].update(
+                values.get(
+                    "pairs",
+                    {},
+                )
+            )
+
+            for word, transitions in (
+                values.get(
+                    "transitions",
+                    {},
+                ).items()
+            ):
+
+                source_chain[
+                    "transitions"
+                ][word].update(
+                    transitions
+                )
+
+            for phrase, transitions in (
+                values.get(
+                    "phrases",
+                    {},
+                ).items()
+            ):
+
+                source_chain[
+                    "phrases"
+                ][phrase].update(
+                    transitions
+                )
+
+            source_chain[
+                "relationship_classes"
+            ].update(
+                values.get(
+                    "relationship_classes",
+                    {},
+                )
+            )
+
+            source_chain[
+                "languages"
+            ].update(
+                values.get(
+                    "languages",
+                    {},
+                )
+            )
+
+        return chain
+
+    # -------------------------------------------------------------------
+    # SAVE
+    # -------------------------------------------------------------------
+
+    def save(
+        self,
+        path: str,
+    ) -> None:
+
+        directory = os.path.dirname(
+            path
+        )
+
+        if directory:
+            os.makedirs(
+                directory,
+                exist_ok=True,
+            )
+
+        with open(
+            path,
+            "w",
+            encoding="utf-8",
+        ) as f:
+
+            json.dump(
+                self.to_dict(),
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    # -------------------------------------------------------------------
+    # LOAD
+    # -------------------------------------------------------------------
+
+    @classmethod
+    def load(
+        cls,
+        path: str,
+    ) -> "WordChain":
+
+        if not os.path.exists(path):
+            return cls()
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            data = json.load(f)
+
+        return cls.from_dict(data)
+
+    # -------------------------------------------------------------------
+    # UTILITY
+    # -------------------------------------------------------------------
+
+    @staticmethod
+    def _probability(
+        count: int,
+        total: int,
+    ) -> float:
+
+        if total <= 0:
+            return 0.0
+
+        return count / total
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT FACTORY
+# ---------------------------------------------------------------------------
+
+def create_word_chain(
+    path: Optional[str] = None,
+    memory: Optional[MemoryGrid] = None,
+) -> WordChain:
+
+    if path:
+        chain = WordChain.load(path)
+        chain.memory = memory or memory_grid
+        return chain
+
+    return WordChain(
+        memory=memory
+    )
+
+
+# ---------------------------------------------------------------------------
+# COMPATIBILITY HELPERS
+# ---------------------------------------------------------------------------
+
+def extract_word_pairs(
+    text: str,
+) -> List[str]:
+
+    words = linguistic_words(text)
+
+    if not words:
+        words = clean_words(text)
+
+    return [
+        f"{words[i]}_{words[i + 1]}"
+        for i in range(
+            len(words) - 1
+        )
+    ]
+
+
+def extract_next_word_candidates(
+    text: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+
+    chain = WordChain()
+
+    chain.add_text(
+        text,
+        source="conversation",
+    )
+
+    results = []
+
+    words = linguistic_words(text)
+
+    if not words:
+        words = clean_words(text)
+
+    for word in words:
+
+        candidates = chain.next_words(
+            word,
+            limit=limit,
+        )
+
+        results.extend(
+            candidates
+        )
+
+    seen = set()
+    unique = []
+
+    for result in sorted(
+        results,
+        key=lambda x: x["count"],
+        reverse=True,
+    ):
+
+        key = (
+            result["after"],
+            result["word"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(result)
+
+        if len(unique) >= limit:
+            break
+
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# TEST
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    chain = WordChain()
+
+    chain.add_text(
+        "My project uses GSP for deterministic storage.",
+        source="project",
+    )
+
+    chain.add_text(
+        "GSP provides deterministic storage for the project.",
+        source="project",
+    )
+
+    chain.add_text(
+        "A deterministic system produces the same result for the same input.",
+        source="dictionary",
+    )
+
+    print(
+        "Detected language:"
+    )
+
+    print(
+        detect_lang(
+            "My project uses GSP."
+        )
+    )
+
+    print(
+        "\nProject continuation:"
+    )
+
+    print(
+        chain.next_words(
+            "gsp",
+            limit=5,
+            source="project",
+        )
+    )
+
+    print(
+        "\nAlphabet relationship:"
+    )
+
+    print(
+        chain.alphabet_relationship(
+            "deterministic"
+        )
+    )
+
+    print(
+        "\nPhrase continuation:"
+    )
+
+    print(
+        chain.next_words_from_phrase(
+            "deterministic storage",
+            limit=5,
+        )
+    )
+
+    print(
+        "\nKnowledge profile:"
+    )
+
+    print(
+        chain.knowledge_profile()
+    )
