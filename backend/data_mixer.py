@@ -903,4 +903,45 @@ class DataMixer:
         if shuffle:
             random.shuffle(
                 items
+    )
+
+        return [
+            self.mix(
+                text=text,
+                source="dataset",
+            )
+            for text in items
+            if text.strip()
+        ]
+
+    # ======================================================================
+    # STATISTICS
+    # ======================================================================
+
+    def stats(
+        self,
+    ) -> Dict[str, Any]:
+        """
+        Return DataMixer statistics.
+        """
+
+        return {
+            "data_dir": self.data_dir,
+
+            "loaded_texts": len(
+                self.texts
+            ),
+
+            "records": len(
+                self.records
+            ),
+
+            "total_loaded": (
+                self.total_loaded
+            ),
+
+            "total_mixed": (
+                self.total_mixed
+            ),
+        }
      
