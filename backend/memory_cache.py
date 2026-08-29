@@ -872,4 +872,27 @@ class MemoryCache:
             partition: len(
                 self.partition(partition)
             )
-           
+           for partition in VALID_PARTITIONS
+        }
+
+        device_partitions = {
+            partition: len(
+                self.device_partition(partition)
+            )
+
+            for partition in VALID_PARTITIONS
+        }
+
+        return {
+            "user_id": self.user_id,
+            "device_id": self.device_id,
+            "cloud_cache_entries": len(
+                self.cloud_cache
+            ),
+            "device_cache_entries": len(
+                self.device_cache
+            ),
+            "cloud_partitions": cloud_partitions,
+            "device_partitions": device_partitions,
+            "session_limit": self.session_limit,
+        }
