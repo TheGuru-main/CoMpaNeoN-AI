@@ -467,6 +467,28 @@ def get_relationship_class(
 
 
 # ============================================================================
+# RELATIONSHIP CLASS LOOKUP
+# ============================================================================
+
+def detect_language(text: str) -> str:
+    """
+    Detect the language of a text using langdetect.
+
+    Falls back to English for empty, very short, ambiguous,
+    or otherwise undetectable text.
+    """
+
+    if not text or not str(text).strip():
+        return "en"
+
+    try:
+        return detect(str(text))
+    except LangDetectException:
+        return "en"
+    except Exception:
+        return "en"
+
+# ============================================================================
 # LANGUAGE-AWARE RELATIONSHIP LOOKUP
 # ============================================================================
 
@@ -902,4 +924,20 @@ def language_info(
 
 def export_matrix_registry() -> Dict[str, Any]:
     """
-    Return the c
+    Return the complete deterministic alphabet-matrix registry.
+
+    This is useful when the matrix later becomes part of the model
+    training/deployment metadata.
+    """
+
+    return {
+        "relationship_classes": {
+            str(class_id): list(pairs)
+            for class_id, pairs
+            in RELATION_MATRIX.items()
+        },
+        "languages": {
+            lang: language_info(lang)
+            for lang in supported_languages()
+        },
+    }
