@@ -887,4 +887,46 @@ class Message(Base):
 
 class APIKey(Base):
     """
-    API credentials for programmat
+    API credentials for programmatic access.
+
+    This is separate from organization worker credentials.
+    """
+
+    __tablename__ = "api_keys"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    key = Column(
+        String(64),
+        unique=True,
+        nullable=False,
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
+
+    organization_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id"),
+        nullable=True,
+        index=True,
+    )
+
+    is_active = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime,
+        default=utcnow,
+    )
