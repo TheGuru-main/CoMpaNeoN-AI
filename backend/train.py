@@ -972,4 +972,55 @@ def train(
             metadata,
             f,
             indent=4,
+          ensure_ascii=False,
+        )
+
+    print(
+        "Model and aligned vocab metadata "
+        f"saved under deployment pointer: "
+        f"{batch_version}"
+    )
+
+    return {
+        "batch_version":
+            batch_version,
+
+        "training_source":
+            "memorygrid",
+
+        "training_records":
+            len(records),
+
+        "encoded_documents":
+            len(encoded_docs),
+
+        "vocabulary_size":
+            len(vocab),
+
+        "languages":
+            language_counts,
+
+        "sources":
+            source_counts,
+
+        "final_loss":
+            avg_loss,
+
+        "model_path":
+            save_model,
+
+        "vocab_path":
+            save_vocab,
+    }
+
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+
+    train(
+        memory_grid=MemoryGrid()
+    )
          
