@@ -1651,3 +1651,210 @@ async def fetch_apitube_videos(
 # ============================================================================
 # VIDEO TRANSCRIPT NORMALIZATION
 # ===================================================
+
+def normalize_video_transcript(
+    *,
+    source: str,
+    video_id: str,
+    transcript: str,
+    title: str = "",
+    url: str = "",
+    metadata: Optional[
+        Dict[str, Any]
+    ] = None,
+) -> Dict[str, Any]:
+    """
+    Convert a retrieved video transcript into a crawler document.
+
+    The actual transcript acquisition is deliberately left to the
+    appropriate provider/crawler implementation.
+    """
+
+    metadata = dict(
+        metadata or {}
+    )
+
+    metadata[
+        "transcript_available"
+    ] = bool(
+        transcript
+    )
+
+    return normalize_document(
+        source=source,
+        source_type="video_transcript",
+        content=transcript,
+        title=title,
+        url=url,
+        external_id=video_id,
+        metadata=metadata,
+    )
+
+
+# ============================================================================
+# PROVIDER DISPATCH
+# ============================================================================
+
+async def search_external(
+    source: str,
+    query: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Generic provider dispatcher.
+
+    web_crawler.py can call:
+
+        await search_external(
+            "youtube",
+            query,
+        )
+
+    without knowing the implementation details of the provider.
+    """
+
+    source = normalize_source(
+        source
+    )
+
+    if source == "dictionary":
+        return await fetch_dictionary(
+            query
+        )
+
+    if source == "news":
+        return await fetch_news(
+            query,
+            **kwargs,
+        )
+
+    if source == "openlibrary":
+        return await fetch_books(
+            query,
+            **kwargs,
+        )
+
+    if source == "google_books":
+        return await fetch_elibrary(
+            query,
+            **kwargs,
+        )
+
+    if source == "wikipedia":
+        return await fetch_wikipedia(
+            query,
+            **kwargs,
+        )
+
+    if source == "github":
+        return await fetch_github_ebooks(
+            query,
+            **kwargs,
+        )
+
+    if source == "youtube":
+        return await fetch_youtube_videos(
+            query,
+            **kwargs,
+        )
+
+    if source == "apitube":
+        return await fetch_apitube_videos(
+            query,
+            **kwargs,
+        )
+
+    raise ValueError(
+        f"Unsupported external source: "
+        f"{source}"
+    )
+
+
+# ============================================================================
+# SOURCE METADATA
+# ============================================================================
+
+def source_metadata(
+    source: str,
+) -> Dict[str, Any]:
+    """
+    Return crawler-facing information about a source.
+    """
+
+    config = get_source(
+        source
+    )
+
+    if not config:
+        return {}
+
+    result = dict(
+        config
+    )
+
+    environment_key = config.get(
+        "environment_key"
+    )
+
+    if environment_key:
+        result[
+            "configured"
+        ] = bool(
+            os.getenv(
+                environment_key
+            )
+        )
+    else:
+        result[
+            "configured"
+        ] = True
+
+    return result
+
+
+# ============================================================================
+# REGISTRY
+# ============================================================================
+
+def external_registry() -> Dict[str, Any]:
+    """
+    Return the complete external provider registry.
+
+    Useful for web_crawler.py initialization and diagnostics.
+    """
+
+    return {
+        source: source_metadata(
+            source
+        )
+        for source in list_sources()
+    }
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "Registered external sources:"
+    )
+
+    for source in list_sources():
+
+        info = source_metadata(
+            source
+        )
+
+        print(
+            source,
+            "->",
+            info.get(
+                "provider"
+            ),
+            "| configured:",
+            info.get(
+                "configured"
+            ),
+        )
