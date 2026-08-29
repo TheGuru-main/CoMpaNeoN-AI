@@ -1038,4 +1038,238 @@ def score_candidate(
         forward_found = False
         cloud_found = False
 
-        for encounter in craw
+        for encounter in crawler_encounters:
+
+            if not isinstance(
+                encounter,
+                dict,
+            ):
+                continue
+
+            encounter_type = str(
+                encounter.get(
+                    "type",
+                    "",
+                )
+            ).lower()
+
+            if (
+                encounter_type
+                in {
+                    "backward",
+                    "backward_perturbation",
+                    "backward_d",
+                }
+            ):
+
+                backward_found = True
+
+            if (
+                encounter_type
+                in {
+                    "forward",
+                    "forward_perturbation",
+                    "forward_d",
+                    "perturbation",
+                }
+            ):
+
+                forward_found = True
+
+            if (
+                encounter_type
+                in {
+                    "elastic_cloud",
+                    "cloud",
+                }
+            ):
+
+                cloud_found = True
+
+        if backward_found:
+
+            scores[
+                "backward_perturbation"
+            ] = max(
+                scores[
+                    "backward_perturbation"
+                ],
+                WEIGHTS[
+                    "backward_perturbation"
+                ],
+            )
+
+        if forward_found:
+
+            scores[
+                "perturbation"
+            ] = max(
+                scores[
+                    "perturbation"
+                ],
+                WEIGHTS[
+                    "perturbation"
+                ],
+            )
+
+        if cloud_found:
+
+            scores[
+                "cloud_encounter"
+            ] = WEIGHTS[
+                "cloud_encounter"
+            ]
+
+    # ========================================================================
+    # 3×3
+    # ========================================================================
+
+    if (
+        q_cell
+        and c_cell
+    ):
+
+        neighbors = (
+            get_three_by_three(
+                q_cell
+            )
+        )
+
+        if any(
+            _same_cell(
+                cell,
+                c_cell,
+            )
+            for cell in neighbors
+        ):
+
+            scores[
+                "three_by_three"
+            ] = WEIGHTS[
+                "three_by_three"
+            ]
+
+    # ========================================================================
+    # ELASTIC CLOUD
+    # ========================================================================
+
+    q_cloud = (
+        compute_elastic_cloud(
+            query,
+            lang,
+        )
+    )
+
+    if c_cell:
+
+        if any(
+            _same_cell(
+                cell,
+                c_cell,
+            )
+            for cell in q_cloud
+        ):
+
+            scores[
+                "elastic_cloud"
+            ] = WEIGHTS[
+                "elastic_cloud"
+            ]
+
+    # ========================================================================
+    # FRESHNESS
+    # ========================================================================
+
+    scores[
+        "freshness"
+    ] = (
+        min(
+            max(
+                freshness_score,
+                0.0,
+            ),
+            5.0,
+        )
+        / 5.0
+    ) * WEIGHTS[
+        "freshness"
+    ]
+
+    # ========================================================================
+    # WEAK LEXICAL
+    # ========================================================================
+
+    weak_lex = letter_score(
+        q_tokens,
+        candidate_text,
+        lang,
+    )
+
+    if weak_lex < 20:
+
+        scores[
+            "weak_lexical"
+        ] = (
+            weak_lex / 20
+        ) * WEIGHTS[
+            "weak_lexical"
+        ]
+
+    # ========================================================================
+    # DISTANT RELATIONSHIP
+    # ========================================================================
+
+    if (
+        scores[
+            "relationship"
+        ]
+        < (
+            WEIGHTS[
+                "relationship"
+            ]
+            * 0.3
+        )
+    ):
+
+        scores[
+            "distant_relationship"
+        ] = (
+            WEIGHTS[
+                "distant_relationship"
+            ]
+            * 0.5
+        )
+
+    # ========================================================================
+    # CLOUD ENCOUNTER
+    # ========================================================================
+
+    if (
+        scores[
+            "elastic_cloud"
+        ] > 0
+    ):
+
+        scores[
+            "cloud_encounter"
+        ] = max(
+            scores[
+                "cloud_encounter"
+            ],
+            WEIGHTS[
+                "cloud_encounter"
+            ] * 0.5,
+        )
+
+    # ========================================================================
+    # TOTAL
+    # ========================================================================
+
+    total = sum(
+        scores.values()
+    )
+
+    return {
+        "total": total,
+        "scores": scores,
+    }
