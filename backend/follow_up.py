@@ -1,167 +1,581 @@
 """
 Follow-up Questions Module
+==========================
 
-Generates contextual follow-up question suggestions based on the user's last query
-and the AI's last answer. Uses keyword extraction and simple templates.
+CoMpaNeoN post-response continuity layer.
+
+Responsibilities:
+    - Understand the user's query and AI answer.
+    - Feed conversational language into WordChain.
+    - Preserve word and phrase continuity.
+    - Generate deterministic contextual follow-up questions.
+    - Return a structured interaction event for the memory layer.
+    - Support ProjectTraceMemoryLayer without owning STM/LTM routing.
+
+Architecture:
+
+    User Query
+        ↓
+    WordUnderstanding
+        ↓
+    WordChain
+        ↓
+    AI Response
+        ↓
+    FollowUp
+        ↓
+    ProjectTraceMemoryLayer
+        ↓
+    MemoryGrid / PSTM / LTM
+
+Important:
+
+FollowUp does NOT:
+    - generate the primary AI response
+    - perform model inference
+    - replace ranking.py
+    - replace word_chain.py
+    - replace word_understanding.py
+    - own MemoryGrid placement
+    - own GSP-XOR relevancy sharding
+    - decide final STM/LTM storage
 """
 
+from __future__ import annotations
+
 import re
-from collections import defaultdict, Counter
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+)
 
 from intent_analyzer import detect_domain
 from symbols import recognize_symbols
 
+from word_chain import (
+    WordChain,
+    clean_words,
+)
+
+from word_understanding import (
+    WordUnderstanding,
+)
+
+from memory_grid import MemoryGrid
+
+
+# ---------------------------------------------------------------------------
+# STOP WORDS
+# ---------------------------------------------------------------------------
 
 STOP_WORDS = {
-    "the","a","an","is","are","was","were","be","been","being","have","has","had",
-    "do","does","did","will","would","shall","should","may","might","must","can","could",
-    "of","in","on","at","by","for","with","about","against","between","into","through",
-    "during","before","after","above","below","to","from","up","down","out","off","over",
-    "under","again","further","then","once","here","there","when","where","why","how",
-    "all","any","both","each","few","more","most","other","some","such","no","nor","not",
-    "only","own","same","so","than","too","very","s","t","just","don","now","i","me","my",
-    "we","our","ours","you","your","yours","he","him","his","she","her","hers","it","its",
-    "they","them","their","theirs","what","which","who","whom","this","that","these","those"
+    "the", "a", "an", "is", "are", "was", "were",
+    "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "shall",
+    "should", "may", "might", "must", "can", "could",
+    "of", "in", "on", "at", "by", "for", "with",
+    "about", "against", "between", "into", "through",
+    "during", "before", "after", "above", "below",
+    "to", "from", "up", "down", "out", "off", "over",
+    "under", "again", "further", "then", "once",
+    "here", "there", "when", "where", "why", "how",
+    "all", "any", "both", "each", "few", "more",
+    "most", "other", "some", "such", "no", "nor",
+    "not", "only", "own", "same", "so", "than",
+    "too", "very", "s", "t", "just", "don", "now",
+    "i", "me", "my", "we", "our", "ours", "you",
+    "your", "yours", "he", "him", "his", "she",
+    "her", "hers", "it", "its", "they", "them",
+    "their", "theirs", "what", "which", "who",
+    "whom", "this", "that", "these", "those",
 }
 
 
-def extract_keywords(text: str, top_n=5):
-    """Extract top keywords excluding stop words."""
-    words = re.findall(r"[a-zA-Z]+", text.lower())
+# ---------------------------------------------------------------------------
+# KEYWORD EXTRACTION
+# ---------------------------------------------------------------------------
+
+def extract_keywords(
+    text: str,
+    top_n: int = 5,
+) -> List[str]:
+    """
+    Extract deterministic keywords.
+
+    WordChain remains responsible for word relationships.
+    This helper only identifies useful lexical subjects for
+    follow-up question construction.
+    """
+
+    words = re.findall(
+        r"[a-zA-Z0-9_]+",
+        str(text).lower(),
+    )
+
     filtered = [
-        w
-        for w in words
-        if w not in STOP_WORDS and len(w) > 2
+        word
+        for word in words
+        if (
+            word not in STOP_WORDS
+            and len(word) > 2
+        )
     ]
 
-    freq = {}
+    frequency: Dict[str, int] = {}
 
-    for w in filtered:
-        freq[w] = freq.get(w, 0) + 1
+    for word in filtered:
+        frequency[word] = (
+            frequency.get(word, 0) + 1
+        )
 
-    sorted_words = sorted(
-        freq.items(),
-        key=lambda x: x[1],
-        reverse=True
+    ranked = sorted(
+        frequency.items(),
+        key=lambda item: (
+            -item[1],
+            item[0],
+        ),
     )
 
     return [
-        w
-        for w, _ in sorted_words[:top_n]
+        word
+        for word, _ in ranked[:top_n]
     ]
 
 
-def extract_word_pairs(text: str):
+# ---------------------------------------------------------------------------
+# WORD PAIRS
+# ---------------------------------------------------------------------------
+
+def extract_word_pairs(
+    text: str,
+) -> List[str]:
     """
-    Extract adjacent word pairs from text.
+    Compatibility helper.
 
-    Example:
-        "python is a programming language"
-
-    produces:
-        python_is
-        is_a
-        a_programming
-        programming_language
+    WordChain is the authoritative relationship engine,
+    but this helper remains available for existing callers.
     """
 
-    words = re.findall(
-        r"[a-zA-Z0-9_]+",
-        text.lower()
-    )
+    words = clean_words(text)
 
     return [
-        f"{words[i]}_{words[i + 1]}"
-        for i in range(len(words) - 1)
+        f"{words[index]}_{words[index + 1]}"
+        for index in range(
+            len(words) - 1
+        )
     ]
 
 
-def extract_next_word_candidates(text: str, limit=5):
-    """
-    Find likely next words from observed adjacent word sequences.
+# ---------------------------------------------------------------------------
+# NEXT-WORD CANDIDATES
+# ---------------------------------------------------------------------------
 
-    This is intentionally lightweight and deterministic.
-    It does not require embeddings or vector databases.
+def extract_next_word_candidates(
+    text: str,
+    limit: int = 5,
+    word_chain: Optional[WordChain] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Return continuation candidates using WordChain.
+
+    If no persistent WordChain is supplied, a temporary chain is
+    created for compatibility with the previous implementation.
     """
 
-    words = re.findall(
-        r"[a-zA-Z0-9_]+",
-        text.lower()
+    chain = (
+        word_chain
+        if word_chain is not None
+        else WordChain()
     )
 
-    if len(words) < 2:
-        return []
+    if word_chain is None:
+        chain.add_text(
+            text,
+            source="conversation",
+        )
 
-    transitions = defaultdict(Counter)
-
-    for i in range(len(words) - 1):
-
-        current_word = words[i]
-        next_word = words[i + 1]
-
-        if current_word in STOP_WORDS:
-            continue
-
-        transitions[current_word][next_word] += 1
-
-    candidates = []
-
-    for word, next_words in transitions.items():
-
-        for next_word, count in next_words.most_common(limit):
-
-            candidates.append({
-                "word": next_word,
-                "after": word,
-                "count": count,
-                "pair": f"{word}_{next_word}",
-            })
-
-    candidates.sort(
-        key=lambda x: x["count"],
-        reverse=True
+    return chain.predict_from_text(
+        text,
+        limit=limit,
     )
 
-    return candidates[:limit]
 
+# ---------------------------------------------------------------------------
+# FOLLOW-UP ENGINE
+# ---------------------------------------------------------------------------
+
+class FollowUp:
+    """
+    CoMpaNeoN follow-up and post-response continuity engine.
+
+    The engine can operate with:
+
+        WordChain
+        WordUnderstanding
+        MemoryGrid
+
+    independently or together.
+    """
+
+    def __init__(
+        self,
+        word_chain: Optional[WordChain] = None,
+        word_understanding: Optional[
+            WordUnderstanding
+        ] = None,
+        memory_grid: Optional[MemoryGrid] = None,
+    ):
+        self.word_chain = (
+            word_chain
+            if word_chain is not None
+            else WordChain()
+        )
+
+        self.word_understanding = (
+            word_understanding
+        )
+
+        self.memory = memory_grid
+
+    # ==================================================================
+    # UNDERSTAND INTERACTION
+    # ==================================================================
+
+    def understand_interaction(
+        self,
+        query: str,
+        answer: str,
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """
+        Understand the interaction before it is sent to
+        the project-trace memory layer.
+        """
+
+        domain = detect_domain(
+            query
+        )
+
+        understanding = None
+
+        if self.word_understanding is not None:
+
+            understanding = (
+                self.word_understanding.understand(
+                    query,
+                    lang=lang,
+                )
+            )
+
+        return {
+            "query": query,
+            "answer": answer,
+            "language": lang,
+            "domain": domain,
+            "understanding": understanding,
+        }
+
+    # ==================================================================
+    # ADD INTERACTION TO WORDCHAIN
+    # ==================================================================
+
+    def learn_interaction(
+        self,
+        query: str,
+        answer: str,
+        source: str = "conversation",
+    ) -> Dict[str, Any]:
+        """
+        Feed both sides of the interaction into WordChain.
+
+        Query and answer are deliberately ingested separately so their
+        linguistic provenance remains distinguishable.
+        """
+
+        query_result = self.word_chain.add_text(
+            query,
+            source=source,
+        )
+
+        answer_result = self.word_chain.add_text(
+            answer,
+            source=source,
+        )
+
+        return {
+            "query": query_result,
+            "answer": answer_result,
+        }
+
+    # ==================================================================
+    # CONTINUITY
+    # ==================================================================
+
+    def continuity(
+        self,
+        query: str,
+        answer: str,
+    ) -> Dict[str, float]:
+        """
+        Calculate continuity between the user's query and AI answer.
+        """
+
+        return {
+            "phrase_continuity": (
+                self.word_chain.phrase_continuity(
+                    query,
+                    answer,
+                )
+            ),
+            "pair_overlap": (
+                self.word_chain.pair_overlap(
+                    query,
+                    answer,
+                )
+            ),
+        }
+
+    # ==================================================================
+    # WORDCHAIN CANDIDATES
+    # ==================================================================
+
+    def continuation_candidates(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve learned continuation candidates.
+        """
+
+        return self.word_chain.predict_from_text(
+            query,
+            limit=limit,
+        )
+
+    # ==================================================================
+    # MEMORY EVENT
+    # ==================================================================
+
+    def build_memory_event(
+        self,
+        query: str,
+        answer: str,
+        lang: str = "en",
+        source: str = "conversation",
+        user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+        room_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build the interaction event consumed by the
+        ProjectTraceMemoryLayer.
+
+        This method does NOT decide relevancy.
+
+        GSP-XOR relevancy sharding belongs to the memory layer.
+        """
+
+        analysis = self.understand_interaction(
+            query=query,
+            answer=answer,
+            lang=lang,
+        )
+
+        continuity = self.continuity(
+            query,
+            answer,
+        )
+
+        query_keywords = extract_keywords(
+            query
+        )
+
+        answer_keywords = extract_keywords(
+            answer
+        )
+
+        return {
+            "event_type": "conversation_interaction",
+
+            "query": query,
+
+            "answer": answer,
+
+            "language": lang,
+
+            "source": source,
+
+            "user_id": user_id,
+
+            "org_id": org_id,
+
+            "room_id": room_id,
+
+            "domain": analysis[
+                "domain"
+            ],
+
+            "query_keywords": query_keywords,
+
+            "answer_keywords": answer_keywords,
+
+            "continuity": continuity,
+
+            "wordchain": {
+                "query_candidates": (
+                    self.continuation_candidates(
+                        query
+                    )
+                ),
+                "query_pairs": (
+                    extract_word_pairs(
+                        query
+                    )
+                ),
+                "answer_pairs": (
+                    extract_word_pairs(
+                        answer
+                    )
+                ),
+            },
+
+            "understanding": analysis[
+                "understanding"
+            ],
+        }
+
+    # ==================================================================
+    # POST RESPONSE
+    # ==================================================================
+
+    def process_response(
+        self,
+        query: str,
+        answer: str,
+        lang: str = "en",
+        source: str = "conversation",
+        user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+        room_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process an interaction after the AI response.
+
+        Flow:
+
+            query + answer
+                ↓
+            WordChain learning
+                ↓
+            understanding
+                ↓
+            continuity
+                ↓
+            memory event
+                ↓
+            ProjectTraceMemoryLayer
+
+        The actual memory routing is intentionally left to the
+        ProjectTraceMemoryLayer.
+        """
+
+        learning = self.learn_interaction(
+            query=query,
+            answer=answer,
+            source=source,
+        )
+
+        event = self.build_memory_event(
+            query=query,
+            answer=answer,
+            lang=lang,
+            source=source,
+            user_id=user_id,
+            org_id=org_id,
+            room_id=room_id,
+        )
+
+        return {
+            "learning": learning,
+            "event": event,
+        }
+
+
+# ---------------------------------------------------------------------------
+# MODULE-LEVEL API
+# ---------------------------------------------------------------------------
 
 def generate_follow_ups(
     query: str,
     answer: str,
-    domain: str = "general",
-    max_questions=3
-):
+    domain: Optional[str] = None,
+    max_questions: int = 3,
+    word_chain: Optional[WordChain] = None,
+    word_understanding: Optional[
+        WordUnderstanding
+    ] = None,
+    memory_grid: Optional[MemoryGrid] = None,
+) -> List[str]:
     """
     Generate contextual follow-up questions.
 
-    Uses:
-    - query keywords
-    - answer keywords
-    - word-pair continuity
-    - domain
-    - previous conversational subject
+    WordChain and WordUnderstanding are now available to the
+    follow-up layer.
+
+    The actual AI response remains outside this module.
     """
 
-    query_keywords = extract_keywords(query)
-    answer_keywords = extract_keywords(answer)
+    engine = FollowUp(
+        word_chain=word_chain,
+        word_understanding=word_understanding,
+        memory_grid=memory_grid,
+    )
 
-    keywords = query_keywords or answer_keywords
+    # ---------------------------------------------------------------
+    # DOMAIN
+    # ---------------------------------------------------------------
+
+    if domain is None:
+        domain = detect_domain(
+            query
+        )
+
+    # ---------------------------------------------------------------
+    # KEYWORDS
+    # ---------------------------------------------------------------
+
+    query_keywords = extract_keywords(
+        query
+    )
+
+    answer_keywords = extract_keywords(
+        answer
+    )
+
+    keywords = (
+        query_keywords
+        or answer_keywords
+    )
 
     if not keywords:
         return []
 
-    questions = []
-
     primary = keywords[0]
+
     secondary = (
         keywords[1]
         if len(keywords) > 1
         else None
     )
 
-    # ---------------------------------------------------------
-    # CONTEXTUAL QUESTIONS
-    # ---------------------------------------------------------
+    questions: List[str] = []
+
+    # ---------------------------------------------------------------
+    # DOMAIN QUESTIONS
+    # ---------------------------------------------------------------
 
     if domain == "code":
 
@@ -171,6 +585,7 @@ def generate_follow_ups(
         ])
 
         if secondary:
+
             questions.append(
                 f"How does {primary} relate to {secondary}?"
             )
@@ -213,30 +628,55 @@ def generate_follow_ups(
             ),
         ])
 
-    # ---------------------------------------------------------
-    # WORD-PAIR CONTINUITY
-    # ---------------------------------------------------------
+    # ---------------------------------------------------------------
+    # WORDCHAIN CONTINUITY
+    # ---------------------------------------------------------------
 
-    pairs = extract_word_pairs(query)
+    candidates = (
+        engine.continuation_candidates(
+            query,
+            limit=3,
+        )
+    )
+
+    if candidates:
+
+        candidate = candidates[0].get(
+            "word"
+        )
+
+        after = candidates[0].get(
+            "after"
+        )
+
+        if candidate and after:
+
+            questions.append(
+                f"How does {after} relate to {candidate}?"
+            )
+
+    # ---------------------------------------------------------------
+    # LAST WORD-PAIR
+    # ---------------------------------------------------------------
+
+    pairs = extract_word_pairs(
+        query
+    )
 
     if pairs:
 
-        last_pair = pairs[-1]
+        first, second = pairs[-1].split(
+            "_",
+            1,
+        )
 
-        if "_" in last_pair:
+        questions.append(
+            f"How does {first} relate to {second}?"
+        )
 
-            first, second = last_pair.split(
-                "_",
-                1
-            )
-
-            questions.append(
-                f"How does {first} relate to {second}?"
-            )
-
-    # ---------------------------------------------------------
-    # REMOVE DUPLICATES
-    # ---------------------------------------------------------
+    # ---------------------------------------------------------------
+    # DEDUPLICATION
+    # ---------------------------------------------------------------
 
     unique_questions = []
 
@@ -248,6 +688,101 @@ def generate_follow_ups(
             question
             and question not in unique_questions
         ):
-            unique_questions.append(question)
+            unique_questions.append(
+                question
+            )
 
-    return unique_questions[:max_questions]
+    return unique_questions[
+        :max_questions
+    ]
+
+
+# ---------------------------------------------------------------------------
+# CONVENIENCE POST-RESPONSE FUNCTION
+# ---------------------------------------------------------------------------
+
+def process_ai_interaction(
+    query: str,
+    answer: str,
+    lang: str = "en",
+    source: str = "conversation",
+    word_chain: Optional[WordChain] = None,
+    word_understanding: Optional[
+        WordUnderstanding
+    ] = None,
+    memory_grid: Optional[MemoryGrid] = None,
+    user_id: Optional[int] = None,
+    org_id: Optional[int] = None,
+    room_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Convenience entry point for the model/runtime layer.
+
+    This is the intended post-response integration point.
+    """
+
+    engine = FollowUp(
+        word_chain=word_chain,
+        word_understanding=word_understanding,
+        memory_grid=memory_grid,
+    )
+
+    return engine.process_response(
+        query=query,
+        answer=answer,
+        lang=lang,
+        source=source,
+        user_id=user_id,
+        org_id=org_id,
+        room_id=room_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DEVELOPMENT
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    chain = WordChain()
+
+    engine = FollowUp(
+        word_chain=chain,
+    )
+
+    query = (
+        "How does deterministic storage work "
+        "in the GSP project?"
+    )
+
+    answer = (
+        "Deterministic storage maps the same input "
+        "to the same storage location."
+    )
+
+    result = engine.process_response(
+        query=query,
+        answer=answer,
+        lang="en",
+        source="project",
+    )
+
+    print(
+        "Interaction:"
+    )
+
+    print(
+        result
+    )
+
+    print(
+        "\nFollow-ups:"
+    )
+
+    print(
+        generate_follow_ups(
+            query=query,
+            answer=answer,
+            word_chain=chain,
+        )
+    )
