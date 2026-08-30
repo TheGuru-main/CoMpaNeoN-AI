@@ -887,19 +887,19 @@ class MemoryGrid:
                   key = (
                   item.get("doc_id"),
                   item.get("original"),
-              )
+                  )
 
-              if key in seen_word:
+                  if key in seen_word:
 
-                  continue
+                      continue
 
-              seen_word.add(
-                key
-              )
+                  seen_word.add(
+                    key
+                  )
 
-              result["word"].append(
-                item
-              )
+                  result["word"].append(
+                    item
+                  )
 
         # -------------------------------------------------------------
         # STORAGE ROUTE
@@ -927,7 +927,7 @@ class MemoryGrid:
                 IndexError,
                 ValueError,
                 TypeError,
-            ):
+                ):
 
                 document = None
 
