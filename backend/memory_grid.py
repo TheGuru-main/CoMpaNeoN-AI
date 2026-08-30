@@ -832,4 +832,638 @@ class MemoryGrid:
 
         return doc_id
 
-   
+# =================================================================
+# RETRIEVAL — ONE TOKEN
+# =================================================================
+
+def retrieve_by_token(
+    self,
+    token_info: Dict[str, Any],
+) -> Dict[
+    str,
+    List[Dict[str, Any]]
+]:
+    """
+    Retrieve candidates for one token through the independent
+    token routes.
+
+    Returns:
+
+        {
+            "letter": [...],
+            "word": [...],
+            "storage": [...]
+        }
+
+    No ranking occurs here.
+    """
+
+    result = {
+        "letter": [],
+        "word": [],
+        "storage": [],
+    }
+
+    # -------------------------------------------------------------
+    # WORD ROUTE
+    # -------------------------------------------------------------
+
+    word_row, word_col = self._word_cell(
+        token_info
+    )
+
+    word_entries = self.get_tokens_at_word(
+        word_row,
+        word_col,
+    )
+
+    seen_word = set()
+
+    for item in word_entries:
+
+        key = (
+            item.get("doc_id"),
+            item.get("original"),
+        )
+
+        if key in seen_word:
+            continue
+
+        seen_word.add(key)
+
+        result["word"].append(
+            item
+        )
+
+    # -------------------------------------------------------------
+    # STORAGE ROUTE
+    #
+    # Token retrieval can use the complete original document
+    # associated with the token.
+    #
+    # We therefore resolve the token's document and use the
+    # document's complete text for the GSP storage lookup.
+    # -------------------------------------------------------------
+
+    doc_id = token_info.get(
+        "doc_id"
+    )
+
+    if doc_id is not None:
+
+        try:
+
+            document = self.doc_store[
+                int(doc_id)
+            ]
+
+        except (
+            IndexError,
+            ValueError,
+            TypeError,
+        ):
+
+            document = None
+
+        if document:
+
+            document_text = document.get(
+                "text",
+                "",
+            )
+
+            document_lang = document.get(
+                "lang",
+                "en",
+            )
+
+            storage_rows = self._storage_cells(
+                document_text,
+                document_lang,
+            )
+
+            seen_storage = set()
+
+            for storage_row in storage_rows:
+
+                storage_entries = (
+                    self.get_tokens_at_storage(
+                        storage_row
+                    )
+                )
+
+                for item in storage_entries:
+
+                    key = (
+                        item.get("doc_id"),
+                        item.get("original"),
+                    )
+
+                    if key in seen_storage:
+                        continue
+
+                    seen_storage.add(
+                        key
+                    )
+
+                    result["storage"].append(
+                        item
+                    )
+
+    return result
+
+
+# =================================================================
+# RETRIEVAL — MULTIPLE TOKENS
+# =================================================================
+
+def retrieve(
+    self,
+    token_infos: List[
+        Dict[str, Any]
+    ],
+) -> Dict[
+    str,
+    List[Dict[str, Any]]
+]:
+    """
+    Retrieve candidates for multiple query tokens.
+
+    The routes remain independent.
+
+    Ranking belongs to the higher-level ranking/understanding
+    architecture.
+    """
+
+    result = {
+        "letter": [],
+        "word": [],
+        "storage": [],
+    }
+
+    seen = {
+        "letter": set(),
+        "word": set(),
+        "storage": set(),
+    }
+
+    for token_info in token_infos:
+
+        routes = self.retrieve_by_token(
+            token_info
+        )
+
+        for route in (
+            "letter",
+            "word",
+            "storage",
+        ):
+
+            for item in routes[route]:
+
+                key = (
+                    item.get("doc_id"),
+                    item.get("original"),
+                )
+
+                if key in seen[route]:
+                    continue
+
+                seen[route].add(
+                    key
+                )
+
+                result[route].append(
+                    item
+                )
+
+    return result
+
+
+# =================================================================
+# DIRECT DOCUMENT STORAGE LOOKUP
+# =================================================================
+
+def retrieve_document_by_gsp(
+    self,
+    text: str,
+    lang: str = "en",
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Retrieve complete-text storage candidates using the text's
+    GSP start row.
+
+    This is the direct full-text/storage lookup.
+
+    It uses:
+
+        keyboard.py
+            calculate_lsum()
+            calculate_ssum()
+            first_letter_index()
+            gsp_place()
+
+    No K.
+    No D.
+    No perturbation.
+    """
+
+    lang = normalize_lang(
+        lang
+    )
+
+    storage_rows = self._storage_cells(
+        text,
+        lang,
+    )
+
+    result = []
+
+    seen = set()
+
+    for row in storage_rows:
+
+        entries = self.get_tokens_at_storage(
+            row
+        )
+
+        for item in entries:
+
+            key = (
+                item.get("doc_id"),
+                item.get("original"),
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(
+                key
+            )
+
+            result.append(
+                item
+            )
+
+    return result
+
+
+# =================================================================
+# DOCUMENT ACCESS
+# =================================================================
+
+def get_doc(
+    self,
+    doc_id: int,
+) -> str:
+    """
+    Return complete original document text.
+    """
+
+    try:
+
+        index = int(
+            doc_id
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ):
+
+        return ""
+
+    if not (
+        0 <= index < len(
+            self.doc_store
+        )
+    ):
+
+        return ""
+
+    return self.doc_store[
+        index
+    ].get(
+        "text",
+        "",
+    )
+
+
+# -----------------------------------------------------------------
+
+def get_doc_tokens(
+    self,
+    doc_id: int,
+) -> list:
+    """
+    Return tokenizer output for a document.
+    """
+
+    try:
+
+        index = int(
+            doc_id
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ):
+
+        return []
+
+    if not (
+        0 <= index < len(
+            self.doc_store
+        )
+    ):
+
+        return []
+
+    return self.doc_store[
+        index
+    ].get(
+        "tokens",
+        [],
+    )
+
+
+# -----------------------------------------------------------------
+
+def get_doc_source(
+    self,
+    doc_id: int,
+) -> str:
+    """
+    Return the source associated with a document.
+    """
+
+    try:
+
+        index = int(
+            doc_id
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ):
+
+        return ""
+
+    if not (
+        0 <= index < len(
+            self.doc_store
+        )
+    ):
+
+        return ""
+
+    return self.doc_store[
+        index
+    ].get(
+        "source",
+        "",
+    )
+
+
+# -----------------------------------------------------------------
+
+def get_doc_language(
+    self,
+    doc_id: int,
+) -> str:
+    """
+    Return the normalized language of a document.
+    """
+
+    try:
+
+        index = int(
+            doc_id
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ):
+
+        return ""
+
+    if not (
+        0 <= index < len(
+            self.doc_store
+        )
+    ):
+
+        return ""
+
+    return self.doc_store[
+        index
+    ].get(
+        "lang",
+        "en",
+    )
+
+
+# =================================================================
+# GSP DOCUMENT INFORMATION
+# =================================================================
+
+def get_doc_gsp(
+    self,
+    doc_id: int,
+) -> Dict[str, int]:
+    """
+    Return the canonical full-text GSP information for a document.
+
+    The returned structure contains:
+
+        L
+        S
+        c
+        R
+        start_row
+
+    This is useful for inspection and diagnostics.
+    """
+
+    try:
+
+        index = int(
+            doc_id
+        )
+
+    except (
+        ValueError,
+        TypeError,
+    ):
+
+        return {}
+
+    if not (
+        0 <= index < len(
+            self.doc_store
+        )
+    ):
+
+        return {}
+
+    document = self.doc_store[
+        index
+    ]
+
+    text = document.get(
+        "text",
+        "",
+    )
+
+    lang = document.get(
+        "lang",
+        "en",
+    )
+
+    return self._storage_gsp(
+        text,
+        lang,
+    )
+
+
+# =================================================================
+# GRID INSPECTION
+# =================================================================
+
+def grid_stats(
+    self,
+) -> Dict[str, int]:
+    """
+    Return basic MemoryGrid statistics.
+    """
+
+    return {
+        "documents": len(
+            self.doc_store
+        ),
+
+        "letter_cells": len(
+            self.letter_grid
+        ),
+
+        "word_cells": len(
+            self.word_grid
+        ),
+
+        "storage_rows": len(
+            self.storage_grid
+        ),
+
+        "storage_dimension": self.rows,
+    }
+
+
+# =================================================================
+# LEGACY COMPATIBILITY
+# =================================================================
+
+def get_tokens_at(
+    self,
+    row: int,
+    col: int,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Legacy compatibility accessor.
+
+    Historically callers used:
+
+        get_tokens_at(row, col)
+
+    Under the current three-route architecture this continues
+    to mean Word Grid access.
+
+    New code should prefer:
+
+        get_tokens_at_letter()
+        get_tokens_at_word()
+        get_tokens_at_storage()
+    """
+
+    return self.get_tokens_at_word(
+        row,
+        col,
+    )
+
+
+# =====================================================================
+# DEVELOPMENT TEST
+# =====================================================================
+
+if __name__ == "__main__":
+
+    grid = MemoryGrid()
+
+    sample_text = (
+        "CoMpaNeoN deterministic "
+        "knowledge memory grid"
+    )
+
+    print(
+        "Adding document..."
+    )
+
+    doc_id = grid.add_document(
+        sample_text,
+        "en",
+        source="development",
+    )
+
+    print(
+        "\nDocument ID:"
+    )
+
+    print(
+        doc_id
+    )
+
+    print(
+        "\nDocument:"
+    )
+
+    print(
+        grid.get_doc(
+            doc_id
+        )
+    )
+
+    print(
+        "\nDocument GSP:"
+    )
+
+    print(
+        grid.get_doc_gsp(
+            doc_id
+        )
+    )
+
+    print(
+        "\nGrid statistics:"
+    )
+
+    print(
+        grid.grid_stats()
+    )
+
+    print(
+        "\nDocument tokens:"
+    )
+
+    for token in grid.get_doc_tokens(
+        doc_id
+    ):
+
+        print(
+            token
+        )
