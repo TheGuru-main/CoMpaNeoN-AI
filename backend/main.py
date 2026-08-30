@@ -301,7 +301,6 @@ async def create_workspace(
         db.close()
 
 
-
 @app.post("/workspace/{ws_id}/message")
 async def add_workspace_message(
     ws_id: str,
@@ -370,7 +369,7 @@ async def add_workspace_message(
         db.close()
 
 
-       @app.post("/workspace/{ws_id}/generate")
+@app.post("/workspace/{ws_id}/generate")
 async def generate_in_workspace(
     ws_id: str,
     req: GenerateRequest,
