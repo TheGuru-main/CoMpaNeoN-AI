@@ -881,40 +881,6 @@ class MemoryGrid:
             word_row,
             word_col,
         )
-
-        seen_word = set()
-
-        for item in word_entries:
-
-            key = (
-                item.get("doc_id"),
-                item.get("original"),
-            )
-
-            if key in seen_word:
-                continue
-
-            seen_word.add(
-                key
-            )
-
-            result["word"].append(
-                item
-            )
-
-
-        # -------------------------------------------------------------
-        # WORD ROUTE
-        # -------------------------------------------------------------
-
-        word_row, word_col = self._word_cell(
-            token_info
-        )
-
-        word_entries = self.get_tokens_at_word(
-            word_row,
-            word_col,
-        )
         seen_word = set()
         for item in word_entries:
 
