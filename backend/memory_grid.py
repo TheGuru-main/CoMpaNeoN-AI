@@ -915,9 +915,8 @@ class MemoryGrid:
             word_row,
             word_col,
         )
-seen_word = set()
-
-              for item in word_entries:
+        seen_word = set()
+        for item in word_entries:
 
                   key = (
                   item.get("doc_id"),
@@ -1012,7 +1011,7 @@ seen_word = set()
                             item
                         )
 
-        return result
+          return result
 
     # =================================================================
     # RETRIEVAL — MULTIPLE TOKENS
@@ -1087,7 +1086,7 @@ seen_word = set()
                         item
                     )
 
-        return result
+           return result
 
     # =================================================================
     # DIRECT DOCUMENT STORAGE LOOKUP
