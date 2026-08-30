@@ -868,38 +868,40 @@ class MemoryGrid:
 
         }
 
+     
         # -------------------------------------------------------------
-        # LETTER ROUTE
+        # WORD ROUTE
         # -------------------------------------------------------------
 
-        seen_letter = set()
-
-        for letter_idx in self._letter_cells(
+        word_row, word_col = self._word_cell(
             token_info
-        ):
+        )
 
-            entries = self.get_tokens_at_letter(
-                letter_idx
+        word_entries = self.get_tokens_at_word(
+            word_row,
+            word_col,
+        )
+
+        seen_word = set()
+
+        for item in word_entries:
+
+            key = (
+                item.get("doc_id"),
+                item.get("original"),
             )
 
-            for item in entries:
+            if key in seen_word:
+                continue
 
-                key = (
-                    item.get("doc_id"),
-                    item.get("original"),
-                )
+            seen_word.add(
+                key
+            )
 
-                if key in seen_letter:
+            result["word"].append(
+                item
+            )
 
-                    continue
-
-                seen_letter.add(
-                    key
-                )
-
-                result["letter"].append(
-                    item
-                )
 
         # -------------------------------------------------------------
         # WORD ROUTE
