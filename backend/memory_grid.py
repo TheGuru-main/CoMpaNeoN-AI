@@ -915,7 +915,7 @@ class MemoryGrid:
         )
 seen_word = set()
 
-        for item in word_entries:
+           for item in word_entries:
 
             key = (
                 item.get("doc_id"),
