@@ -915,24 +915,24 @@ class MemoryGrid:
         )
 seen_word = set()
 
-        for item in word_entries:
+              for item in word_entries:
 
-            key = (
-                item.get("doc_id"),
-                item.get("original"),
-            )
+                  key = (
+                  item.get("doc_id"),
+                  item.get("original"),
+              )
 
-            if key in seen_word:
+              if key in seen_word:
 
-                continue
+                  continue
 
-            seen_word.add(
+              seen_word.add(
                 key
-            )
+              )
 
-            result["word"].append(
+              result["word"].append(
                 item
-            )
+              )
 
         # -------------------------------------------------------------
         # STORAGE ROUTE
