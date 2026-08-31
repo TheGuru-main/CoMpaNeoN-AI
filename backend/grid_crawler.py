@@ -2,78 +2,122 @@
 CoMpaNeoN Grid Crawler
 ======================
 
-Grid traversal layer for CoMpaNeoN.
-
-Responsibilities
-----------------
-- Enter the grid through a canonical GSP start_row.
-- Traverse forward through 250 K positions.
-- Apply forward_d = 5.
-- Apply backward perturbation of 5 positions at EVERY K split.
-- Use backward_d = 1.
-- Call Elastic Cloud around crawler jumps.
-- Collect candidates from MemoryGrid.
-- Index crawled external candidates into MemoryGrid.
-- Preserve language information.
-- Provide candidates for higher-level retrieval/training.
+Query-aware deterministic grid traversal layer.
 
 Architecture
 ------------
-keyboard.py
-    Owns canonical GSP calculation:
-        start_row = ((L + S - 1) % R) + 1
 
+User / AI Query
+    ↓
+placement.py
+    ├── identity/message placement
+    ├── room placement
+    ├── workspace placement
+    └── full-text placement
+    ↓
 tokenizer.py
-    Owns tokenization and linguistic mapping.
-
-MemoryGrid
-    Owns indexed knowledge and retrieval.
-
+    ├── language detection
+    ├── tokenization
+    ├── linguistic normalization
+    ├── alphabet mapping
+    └── word coordinates
+    ↓
 grid_crawler.py
-    Owns crawler traversal only.
-
+    ├── query entry points
+    ├── token entry points
+    ├── full-query entry point
+    ├── K traversal
+    ├── forward movement
+    ├── backward perturbation
+    └── Elastic Cloud
+    ↓
+MemoryGrid
+    ├── Letter Grid
+    ├── Word Grid
+    └── Full-text Storage Grid
+    ↓
+Candidate Board
+    ↓
 crawler_retrieval.py
-    Owns retrieval orchestration/ranking.
+    ↓
+ranking.py
+    ↓
+PromptManager
+    ↓
+AI Model / AI Models
+    ↓
+Response
+
+Responsibilities
+----------------
+
+GridCrawler:
+
+    - receives a user's query
+    - tokenizes the query
+    - creates deterministic grid entry points
+    - uses placement.py where placement context is available
+    - uses tokenizer linguistic coordinates
+    - enters MemoryGrid through canonical GSP positions
+    - traverses K positions
+    - applies forward movement
+    - applies backward perturbations
+    - applies Elastic Cloud
+    - collects candidates
+    - returns query-aware candidate metadata
+
+GridCrawler does NOT:
+
+    - rank final results
+    - decide final intent
+    - generate prompts
+    - generate answers
+    - replace intent_analyzer.py
+    - replace placement.py
+    - replace tokenizer.py
+    - perform AI reasoning
 
 IMPORTANT
 ---------
+
 K and D belong to crawling.
 
 They do NOT belong to:
+
     - tokenizer.py
     - letter placement
     - word placement
-    - ordinary lexical indexing
-    - MemoryGrid word-grid placement
+    - MemoryGrid document placement
+    - prompt generation
+    - AI model inference
 
-Crawler configuration
----------------------
+The crawler is a retrieval traversal layer.
+
+It prepares candidate knowledge for the AI.
+
+Canonical crawler configuration:
+
     K             = 250
     forward_d     = 5
     backward_k    = 5
     backward_d    = 1
-
-For every forward K:
-
-    forward position
-        ↓
-    backward -1
-        ↓
-    backward -2
-        ↓
-    backward -3
-        ↓
-    backward -4
-        ↓
-    backward -5
-
-Elastic Cloud is evaluated during traversal so that neighbouring
-candidate cells can also contribute candidates.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
+
+
+# ============================================================================
+# KEYBOARD / GSP
+# ============================================================================
 
 from keyboard import (
     gsp_place,
@@ -83,6 +127,31 @@ from keyboard import (
     first_letter_index,
     normalise,
 )
+
+
+# ============================================================================
+# TOKENIZER
+# ============================================================================
+
+from tokenizer import (
+    tokenize,
+    normalize_lang,
+)
+
+
+# ============================================================================
+# PLACEMENT
+# ============================================================================
+
+try:
+
+    from placement import (
+        Placement,
+    )
+
+except ImportError:
+
+    Placement = None
 
 
 # ============================================================================
@@ -126,8 +195,22 @@ def _candidate_key(
 ) -> Tuple[Any, Any]:
 
     return (
-        candidate.get("doc_id"),
-        candidate.get("original"),
+        candidate.get(
+            "doc_id"
+        ),
+
+        candidate.get(
+            "original"
+        ),
+    )
+
+
+def _document_key(
+    candidate: Dict[str, Any],
+) -> Any:
+
+    return candidate.get(
+        "doc_id"
     )
 
 
@@ -137,17 +220,43 @@ def _candidate_key(
 
 class GridCrawler:
     """
-    Deterministic crawler over the CoMpaNeoN memory grid.
+    Query-aware deterministic crawler.
 
-    The crawler does not calculate a new linguistic representation.
+    The crawler converts a query into multiple independent
+    retrieval routes.
 
-    It receives or derives the canonical GSP start_row through
-    keyboard.py and then performs crawler traversal.
+    Query routes:
+
+        ROUTE 1
+            Full-query GSP entry.
+
+        ROUTE 2
+            Individual token GSP entries.
+
+        ROUTE 3
+            Tokenizer Word Grid coordinates.
+
+        ROUTE 4
+            MemoryGrid Letter Grid coordinates.
+
+        ROUTE 5
+            Elastic Cloud around canonical token positions.
+
+    These routes remain independent.
+
+    Candidate merging happens here.
+
+    Final ranking belongs above GridCrawler.
     """
+
+    # ========================================================================
+    # INITIALIZATION
+    # ========================================================================
 
     def __init__(
         self,
         memory_grid: Any,
+        placement: Optional[Any] = None,
         K: int = CRAWLER_K,
         forward_d: int = FORWARD_D,
         backward_k: int = BACKWARD_K,
@@ -160,7 +269,11 @@ class GridCrawler:
 
         self.memory = memory_grid
 
-        self.K = int(K)
+        self.placement = placement
+
+        self.K = int(
+            K
+        )
 
         self.forward_d = int(
             forward_d
@@ -183,45 +296,15 @@ class GridCrawler:
         )
 
     # ========================================================================
-    # CANONICAL GSP ENTRY
+    # GRID DIMENSIONS
     # ========================================================================
 
-    def canonical_start_row(
+    @property
+    def rows(
         self,
-        word: str,
-        lang: str = "en",
     ) -> int:
-        """
-        Calculate the canonical GSP start row through keyboard.py.
 
-        Formula:
-
-            start_row =
-                ((Lsum + Ssum - 1) % R) + 1
-
-        The crawler does not redefine this formula.
-        """
-
-        lang = (
-            lang or "en"
-        ).strip().lower()
-
-        normalized = normalise(
-            word,
-            lang,
-        )
-
-        Lsum = calculate_lsum(
-            normalized,
-            lang,
-        )
-
-        Ssum = calculate_ssum(
-            normalized,
-            lang,
-        )
-
-        R = int(
+        return int(
             getattr(
                 self.memory,
                 "rows",
@@ -229,28 +312,274 @@ class GridCrawler:
             )
         )
 
+    # ------------------------------------------------------------------------
+
+    @property
+    def cols(
+        self,
+    ) -> int:
+
+        return int(
+            getattr(
+                self.memory,
+                "cols",
+                26,
+            )
+        )
+
+    # ========================================================================
+    # QUERY LANGUAGE
+    # ========================================================================
+
+    def resolve_language(
+        self,
+        lang: str = "en",
+    ) -> str:
+        """
+        Normalize the query language.
+
+        Language ownership remains with tokenizer.py.
+        """
+
+        return normalize_lang(
+            lang
+        )
+
+    # ========================================================================
+    # QUERY TOKENIZATION
+    # ========================================================================
+
+    def tokenize_query(
+        self,
+        query: str,
+        lang: str = "en",
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Tokenize a user query.
+
+        Tokenizer remains the owner of:
+
+            - token boundaries
+            - language normalization
+            - stems
+            - alphabet indices
+            - word-grid coordinates
+            - local dialect token representation
+        """
+
+        if not query:
+
+            return []
+
+        active_language = self.resolve_language(
+            lang
+        )
+
+        return tokenize(
+            query,
+            active_language,
+        )
+
+    # ========================================================================
+    # CANONICAL GSP ENTRY
+    # ========================================================================
+
+    def canonical_start_row(
+        self,
+        text: str,
+        lang: str = "en",
+        uid: Optional[Any] = None,
+        placement_type: str = "query",
+    ) -> int:
+        """
+        Resolve canonical GSP start row.
+
+        If placement.py is available and can handle the supplied
+        placement type, it may be used as the higher-level placement
+        authority.
+
+        Otherwise keyboard.py remains the canonical GSP fallback.
+
+        This preserves the architecture:
+
+            placement.py
+                owns contextual placement.
+
+            keyboard.py
+                owns GSP mathematics.
+        """
+
+        if not text:
+
+            return 0
+
+        active_language = self.resolve_language(
+            lang
+        )
+
+        # --------------------------------------------------------------------
+        # PLACEMENT LAYER
+        # --------------------------------------------------------------------
+
+        if self.placement is not None:
+
+            if hasattr(
+                self.placement,
+                "place",
+            ):
+
+                try:
+
+                    result = self.placement.place(
+                        text=text,
+                        lang=active_language,
+                        uid=uid,
+                        placement_type=placement_type,
+                    )
+
+                    if isinstance(
+                        result,
+                        dict,
+                    ):
+
+                        start_row = result.get(
+                            "start_row"
+                        )
+
+                        if start_row:
+
+                            return int(
+                                start_row
+                            )
+
+                except (
+                    TypeError,
+                    AttributeError,
+                    ValueError,
+                ):
+
+                    pass
+
+        # --------------------------------------------------------------------
+        # KEYBOARD FALLBACK
+        # --------------------------------------------------------------------
+
+        normalized = normalise(
+            text,
+            active_language,
+        )
+
+        Lsum = calculate_lsum(
+            normalized,
+            active_language,
+        )
+
+        Ssum = calculate_ssum(
+            normalized,
+            active_language,
+        )
+
+        c = first_letter_index(
+            normalized,
+            active_language,
+        )
+
         result = gsp_place(
             Lsum=Lsum,
             Ssum=Ssum,
-            c=first_letter_index(
-                normalized,
-                lang,
-            ),
+            c=c,
             K=0,
             D=self.forward_d,
-            C=int(
-                getattr(
-                    self.memory,
-                    "cols",
-                    26,
-                )
-            ),
-            R=R,
+            C=self.cols,
+            R=self.rows,
         )
 
         return int(
-            result["start_row"]
+            result.get(
+                "start_row",
+                0,
+            )
         )
+
+    # ========================================================================
+    # QUERY GSP INFORMATION
+    # ========================================================================
+
+    def query_gsp(
+        self,
+        query: str,
+        lang: str = "en",
+        uid: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build canonical GSP metadata for a complete query.
+
+        The query is treated as a complete-text retrieval entry.
+
+        This is independent from per-token crawling.
+        """
+
+        active_language = self.resolve_language(
+            lang
+        )
+
+        normalized = normalise(
+            query,
+            active_language,
+        )
+
+        Lsum = calculate_lsum(
+            normalized,
+            active_language,
+        )
+
+        Ssum = calculate_ssum(
+            normalized,
+            active_language,
+        )
+
+        c = first_letter_index(
+            normalized,
+            active_language,
+        )
+
+        start_row = self.canonical_start_row(
+            text=query,
+            lang=active_language,
+            uid=uid,
+            placement_type="query",
+        )
+
+        return {
+
+            "query": query,
+
+            "normalized": normalized,
+
+            "lang": active_language,
+
+            "L": int(
+                Lsum
+            ),
+
+            "S": int(
+                Ssum
+            ),
+
+            "c": int(
+                c
+            ),
+
+            "start_row": int(
+                start_row
+            ),
+
+            "rows": self.rows,
+
+            "cols": self.cols,
+        }
 
     # ========================================================================
     # FORWARD POSITION
@@ -261,20 +590,6 @@ class GridCrawler:
         start_row: int,
         k: int,
     ) -> int:
-        """
-        Calculate the forward crawler row.
-
-            forward_row =
-                ((start_row - 1 + k * forward_d) % R) + 1
-        """
-
-        R = int(
-            getattr(
-                self.memory,
-                "rows",
-                64,
-            )
-        )
 
         return (
             (
@@ -283,7 +598,7 @@ class GridCrawler:
                 + int(k)
                 * self.forward_d
             )
-            % R
+            % self.rows
         ) + 1
 
     # ========================================================================
@@ -293,33 +608,15 @@ class GridCrawler:
     def backward_rows(
         self,
         forward_row: int,
-    ) -> List[int]:
-        """
-        Return the five backward perturbation rows belonging to
-        the current forward K split.
+    ) -> List[
+        int
+    ]:
 
-        For backward_k = 5:
+        rows: List[
+            int
+        ] = []
 
-            forward_row - 1
-            forward_row - 2
-            forward_row - 3
-            forward_row - 4
-            forward_row - 5
-
-        The traversal wraps through the 64-row storage dimension.
-        """
-
-        R = int(
-            getattr(
-                self.memory,
-                "rows",
-                64,
-            )
-        )
-
-        rows = []
-
-        for backward_k in range(
+        for perturbation in range(
             1,
             self.backward_k + 1,
         ):
@@ -328,10 +625,10 @@ class GridCrawler:
                 (
                     int(forward_row)
                     - 1
-                    - backward_k
+                    - perturbation
                     * self.backward_d
                 )
-                % R
+                % self.rows
             ) + 1
 
             rows.append(
@@ -341,44 +638,31 @@ class GridCrawler:
         return rows
 
     # ========================================================================
-    # CRAWLER PATH
+    # TRAVERSAL PATH
     # ========================================================================
 
     def traversal_path(
         self,
         start_row: int,
         start_col: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[
+        Dict[str, Any]
+    ]:
         """
-        Build the deterministic crawler path.
+        Build the deterministic traversal path.
 
-        Each K split produces:
+        Every K split contains:
 
-            1 forward cell
-            5 backward perturbation cells
+            forward position
 
-        Therefore:
+            then:
 
-            250 × 6 = 1500
-
-        primary traversal positions before Elastic Cloud candidates.
+                backward -1
+                backward -2
+                backward -3
+                backward -4
+                backward -5
         """
-
-        rows = int(
-            getattr(
-                self.memory,
-                "rows",
-                64,
-            )
-        )
-
-        cols = int(
-            getattr(
-                self.memory,
-                "cols",
-                26,
-            )
-        )
 
         path: List[
             Dict[str, Any]
@@ -400,7 +684,7 @@ class GridCrawler:
             col = (
                 int(start_col)
                 + k
-            ) % cols
+            ) % self.cols
 
             forward_cell = (
                 forward,
@@ -414,15 +698,20 @@ class GridCrawler:
                 )
 
                 path.append({
+
                     "row": forward,
+
                     "col": col,
+
                     "k": k,
+
                     "direction": "forward",
+
                     "perturbation_k": 0,
                 })
 
             # --------------------------------------------------------------
-            # BACKWARD K = 5 AT THIS SAME FORWARD SPLIT
+            # BACKWARD PERTURBATION
             # --------------------------------------------------------------
 
             for perturbation_k, backward in enumerate(
@@ -432,23 +721,29 @@ class GridCrawler:
                 start=1,
             ):
 
-                backward_cell = (
+                cell = (
                     backward,
                     col,
                 )
 
-                if backward_cell in seen:
+                if cell in seen:
+
                     continue
 
                 seen.add(
-                    backward_cell
+                    cell
                 )
 
                 path.append({
+
                     "row": backward,
+
                     "col": col,
+
                     "k": k,
+
                     "direction": "backward",
+
                     "perturbation_k": perturbation_k,
                 })
 
@@ -466,30 +761,6 @@ class GridCrawler:
     ) -> List[
         Dict[str, int]
     ]:
-        """
-        Call keyboard.py Elastic Cloud.
-
-        Elastic Cloud is used during crawling to gather neighbouring
-        candidate cells.
-
-        It does not replace the canonical traversal.
-        """
-
-        C = int(
-            getattr(
-                self.memory,
-                "cols",
-                26,
-            )
-        )
-
-        R = int(
-            getattr(
-                self.memory,
-                "rows",
-                64,
-            )
-        )
 
         return elastic_cloud(
             L=L,
@@ -499,12 +770,12 @@ class GridCrawler:
             first_letter_radius=(
                 self.elastic_first_letter_radius
             ),
-            C=C,
-            R=R,
+            C=self.cols,
+            R=self.rows,
         )
 
     # ========================================================================
-    # MEMORY GRID CELL ACCESS
+    # MEMORY CELL ACCESS
     # ========================================================================
 
     def _read_cell(
@@ -515,18 +786,17 @@ class GridCrawler:
         Dict[str, Any]
     ]:
         """
-        Read candidates from a MemoryGrid cell.
-
-        MemoryGrid remains the owner of storage.
+        Read every available MemoryGrid route intersecting
+        the crawler position.
         """
 
         results: List[
             Dict[str, Any]
         ] = []
 
-        # --------------------------------------------------------------
-        # Preferred explicit storage accessor.
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
+        # FULL-TEXT STORAGE GRID
+        # --------------------------------------------------------------------
 
         if hasattr(
             self.memory,
@@ -539,10 +809,9 @@ class GridCrawler:
                 )
             )
 
-        # --------------------------------------------------------------
-        # Word-grid lookup can contribute candidates when the crawler
-        # intersects an A×A word coordinate.
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
+        # WORD GRID
+        # --------------------------------------------------------------------
 
         if hasattr(
             self.memory,
@@ -556,9 +825,9 @@ class GridCrawler:
                 )
             )
 
-        # --------------------------------------------------------------
-        # Legacy compatibility.
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
+        # LEGACY
+        # --------------------------------------------------------------------
 
         elif hasattr(
             self.memory,
@@ -575,459 +844,84 @@ class GridCrawler:
         return results
 
     # ========================================================================
-    # CRAWL CELL
+    # LETTER ROUTE
     # ========================================================================
 
-    def crawl_cell(
+    def crawl_token_letters(
         self,
-        row: int,
-        col: int,
+        token_info: Dict[str, Any],
     ) -> List[
         Dict[str, Any]
     ]:
         """
-        Retrieve candidates from one grid position.
+        Retrieve candidates directly through the Letter Grid.
+
+        This is important because the AI must not depend only
+        on whole-text or whole-word matching.
+
+        Tokenized linguistic information is also a retrieval path.
         """
 
-        rows = int(
-            getattr(
-                self.memory,
-                "rows",
-                64,
-            )
-        )
-
-        cols = int(
-            getattr(
-                self.memory,
-                "cols",
-                26,
-            )
-        )
-
-        row, col = _normalise_cell(
-            row,
-            col,
-            rows,
-            cols,
-        )
-
-        return self._read_cell(
-            row,
-            col,
-        )
-
-    # ========================================================================
-    # CRAWL
-    # ========================================================================
-
-    def crawl(
-        self,
-        start_row: int,
-        start_col: int,
-        L: Optional[int] = None,
-        S: Optional[int] = None,
-        c: Optional[int] = None,
-        limit: int = DEFAULT_LIMIT,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Crawl from a canonical GSP entry point.
-
-        Traversal order:
-
-            forward K
-            backward perturbations
-            Elastic Cloud
-
-        Candidates are deduplicated by document/token identity.
-        """
-
-        candidates: List[
+        results: List[
             Dict[str, Any]
         ] = []
 
-        seen_candidates: Set[
+        seen: Set[
             Tuple[Any, Any]
         ] = set()
 
-        path = self.traversal_path(
-            start_row,
-            start_col,
-        )
-
-        for position in path:
-
-            row = position["row"]
-            col = position["col"]
-
-            # ----------------------------------------------------------
-            # PRIMARY CRAWLER CELL
-            # ----------------------------------------------------------
-
-            cells = [
-                {
-                    "row": row,
-                    "col": col,
-                    "source": position["direction"],
-                    "k": position["k"],
-                    "perturbation_k": position[
-                        "perturbation_k"
-                    ],
-                }
-            ]
-
-            # ----------------------------------------------------------
-            # ELASTIC CLOUD
-            # ----------------------------------------------------------
-
-            if (
-                L is not None
-                and S is not None
-                and c is not None
-            ):
-
-                elastic = self.elastic_candidates(
-                    L=L,
-                    S=S,
-                    c=c,
-                )
-
-                for cloud_cell in elastic:
-
-                    cells.append({
-                        "row": cloud_cell["row"],
-                        "col": cloud_cell["col"],
-                        "source": "elastic",
-                        "k": position["k"],
-                        "perturbation_k": position[
-                            "perturbation_k"
-                        ],
-                    })
-
-            # ----------------------------------------------------------
-            # READ ALL CANDIDATE CELLS
-            # ----------------------------------------------------------
-
-            seen_cells: Set[
-                Tuple[int, int]
-            ] = set()
-
-            for cell in cells:
-
-                cell_key = (
-                    int(cell["row"]),
-                    int(cell["col"]),
-                )
-
-                if cell_key in seen_cells:
-                    continue
-
-                seen_cells.add(
-                    cell_key
-                )
-
-                entries = self.crawl_cell(
-                    cell["row"],
-                    cell["col"],
-                )
-
-                for entry in entries:
-
-                    key = _candidate_key(
-                        entry
-                    )
-
-                    if key in seen_candidates:
-                        continue
-
-                    seen_candidates.add(
-                        key
-                    )
-
-                    result = dict(
-                        entry
-                    )
-
-                    result["crawl"] = {
-                        "row": cell["row"],
-                        "col": cell["col"],
-                        "source": cell["source"],
-                        "k": cell["k"],
-                        "perturbation_k": cell[
-                            "perturbation_k"
-                        ],
-                    }
-
-                    candidates.append(
-                        result
-                    )
-
-                    if len(
-                        candidates
-                    ) >= limit:
-
-                        return candidates
-
-        return candidates
-
-    # ========================================================================
-    # WORD-BASED CRAWL
-    # ========================================================================
-
-    def crawl_word(
-        self,
-        word: str,
-        lang: str = "en",
-        limit: int = DEFAULT_LIMIT,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Enter the crawler through a word.
-
-        keyboard.py calculates:
-
-            Lsum
-            Ssum
-            first-letter index
-            canonical GSP start_row
-
-        The crawler then performs K/D traversal.
-        """
-
-        normalized = normalise(
-            word,
-            lang,
-        )
-
-        Lsum = calculate_lsum(
-            normalized,
-            lang,
-        )
-
-        Ssum = calculate_ssum(
-            normalized,
-            lang,
-        )
-
-        c = first_letter_index(
-            normalized,
-            lang,
-        )
-
-        start_row = self.canonical_start_row(
-            normalized,
-            lang,
-        )
-
-        return self.crawl(
-            start_row=start_row,
-            start_col=c,
-            L=Lsum,
-            S=Ssum,
-            c=c,
-            limit=limit,
-        )
-
-    # ========================================================================
-    # EXTERNAL CANDIDATE INDEXING
-    # ========================================================================
-
-    def index_crawled_candidate(
-        self,
-        text: str,
-        lang: str = "en",
-        source: str = "crawler",
-    ) -> Optional[int]:
-        """
-        Index crawled external information into MemoryGrid.
-
-        MemoryGrid remains responsible for tokenization and indexing.
-
-        The crawler does not duplicate MemoryGrid's storage logic.
-        """
-
-        if not text:
-            return None
-
         if not hasattr(
             self.memory,
-            "add_document",
+            "get_tokens_at_letter",
         ):
-            return None
 
-        return self.memory.add_document(
-            text=text,
-            lang=lang,
-            source=source,
+            return results
+
+        letters = token_info.get(
+            "letter",
+            [],
         )
 
-    # ========================================================================
-    # INDEX MANY CRAWLED CANDIDATES
-    # ========================================================================
+        for letter_index in letters:
 
-    def index_crawled_candidates(
-        self,
-        candidates: List[
-            Dict[str, Any]
-        ],
-        lang: str = "en",
-        source: str = "crawler",
-    ) -> List[int]:
-        """
-        Index every externally obtained candidate into MemoryGrid.
-
-        Already-indexed MemoryGrid candidates are not required to pass
-        through this method; this method is intended for newly obtained
-        external crawler material.
-        """
-
-        document_ids: List[int] = []
-
-        for candidate in candidates:
-
-            text = (
-                candidate.get(
-                    "text"
-                )
-                or candidate.get(
-                    "content"
-                )
-                or candidate.get(
-                    "body"
+            entries = (
+                self.memory.get_tokens_at_letter(
+                    int(letter_index)
                 )
             )
 
-            if not text:
-                continue
+            for entry in entries:
 
-            candidate_lang = (
-                candidate.get(
-                    "lang"
+                key = _candidate_key(
+                    entry
                 )
-                or lang
-            )
 
-            doc_id = (
-                self.index_crawled_candidate(
-                    text=text,
-                    lang=candidate_lang,
-                    source=(
-                        candidate.get(
-                            "source"
-                        )
-                        or source
+                if key in seen:
+
+                    continue
+
+                seen.add(
+                    key
+                )
+
+                result = dict(
+                    entry
+                )
+
+                result["crawl"] = {
+
+                    "route": "letter",
+
+                    "letter_index": int(
+                        letter_index
                     ),
-                )
-            )
+                }
 
-            if doc_id is not None:
-
-                document_ids.append(
-                    doc_id
+                results.append(
+                    result
                 )
 
-        return document_ids
+        return results
 
-
-# ============================================================================
-# FUNCTIONAL API
-# ============================================================================
-
-def crawl(
-    memory_grid: Any,
-    start_row: int,
-    start_col: int,
-    limit: int = DEFAULT_LIMIT,
-    L: Optional[int] = None,
-    S: Optional[int] = None,
-    c: Optional[int] = None,
-) -> List[
-    Dict[str, Any]
-]:
-    """
-    Functional compatibility wrapper.
-
-    Existing callers can continue using:
-
-        crawl(
-            memory,
-            row,
-            col,
-            limit=...
-        )
-
-    Optional L/S/c enable Elastic Cloud integration.
-    """
-
-    crawler = GridCrawler(
-        memory_grid
-    )
-
-    return crawler.crawl(
-        start_row=start_row,
-        start_col=start_col,
-        L=L,
-        S=S,
-        c=c,
-        limit=limit,
-    )
-
-
-def crawl_word(
-    memory_grid: Any,
-    word: str,
-    lang: str = "en",
-    limit: int = DEFAULT_LIMIT,
-) -> List[
-    Dict[str, Any]
-]:
-    """
-    Convenience wrapper for word-based crawling.
-    """
-
-    crawler = GridCrawler(
-        memory_grid
-    )
-
-    return crawler.crawl_word(
-        word=word,
-        lang=lang,
-        limit=limit,
-    )
-
-
-# ============================================================================
-# CONFIGURATION ACCESS
-# ============================================================================
-
-def crawler_config() -> Dict[str, int]:
-    """
-    Return canonical crawler configuration.
-
-    These parameters belong exclusively to the crawler layer.
-    """
-
-    return {
-        "K": CRAWLER_K,
-        "forward_d": FORWARD_D,
-        "backward_k": BACKWARD_K,
-        "backward_d": BACKWARD_D,
-    }
-
-
-# ============================================================================
-# DEVELOPMENT TEST
-# ============================================================================
-
-if __name__ == "__main__":
-
-    print(
-        "CoMpaNeoN Grid Crawler"
-    )
-
-    print(
-        crawler_config()
-    )
+    # ========================================================================
+    # WORD ROUT
