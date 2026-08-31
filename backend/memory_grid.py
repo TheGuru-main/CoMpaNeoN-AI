@@ -1022,4 +1022,167 @@ def get_tokens_at_word(
 
     row = (
         _normalise_storage_row(
-    
+            row,
+            self.rows,
+        )
+    )
+
+    col = (
+        _normalise_storage_col(
+            col,
+            self.cols,
+        )
+    )
+
+    return list(
+        self.word_index.get(
+            (
+                row,
+                col,
+            ),
+            [],
+        )
+    )
+
+# ========================================================================
+# LEGACY LOOKUP
+# ========================================================================
+
+def get_tokens_at(
+    self,
+    row: int,
+    col: int,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Compatibility lookup.
+
+    Existing crawlers can request:
+
+        get_tokens_at(row, col)
+    """
+
+    return self.get_tokens_at_word(
+        row,
+        col,
+    )
+
+# ========================================================================
+# DOCUMENT LOOKUP
+# ========================================================================
+
+def get_document(
+    self,
+    doc_id: int,
+) -> Optional[
+    Dict[str, Any]
+]:
+    """
+    Retrieve one stored document.
+    """
+
+    return self.documents.get(
+        int(doc_id)
+    )
+
+# ========================================================================
+# DOCUMENT TOKENS
+# ========================================================================
+
+def get_document_tokens(
+    self,
+    doc_id: int,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Retrieve all tokens belonging to a document.
+    """
+
+    return list(
+        self.tokens.get(
+            int(doc_id),
+            [],
+        )
+    )
+
+# ========================================================================
+# GRID INFORMATION
+# ========================================================================
+
+def stats(
+    self,
+) -> Dict[str, Any]:
+    """
+    Return MemoryGrid statistics.
+    """
+
+    return {
+
+        "rows":
+            self.rows,
+
+        "cols":
+            self.cols,
+
+        "documents":
+            len(
+                self.documents
+            ),
+
+        "tokens":
+            self.tokens_added,
+
+        "documents_added":
+            self.documents_added,
+
+        "duplicates_detected":
+            self.duplicates_detected,
+
+        "storage_rows":
+            len(
+                self.storage_index
+            ),
+
+        "word_cells":
+            len(
+                self.word_index
+            ),
+
+    }
+============================================================================
+DEVELOPMENT TEST
+============================================================================
+if name == "main":
+memory = MemoryGrid()
+
+document_id = (
+    memory.add_document(
+        text=(
+            "CoMpaNeoN is a "
+            "multilingual organizational AI."
+        ),
+        lang="en",
+        source="development",
+    )
+)
+
+print(
+    "CoMpaNeoN MemoryGrid"
+)
+
+print(
+    memory.dimensions()
+)
+
+print(
+    {
+        "document_id":
+            document_id
+    }
+)
+
+print(
+    memory.stats()
+)
