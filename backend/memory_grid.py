@@ -1,1296 +1,1025 @@
 """
 CoMpaNeoN Memory Grid
-=====================
 
-Knowledge Memory Grid for CoMpaNeoN.
+Canonical multilingual memory storage layer.
 
-Architecture
-------------
+ARCHITECTURE
 
-MemoryGrid maintains three independent memory routes:
-
-    ROUTE 1 — LETTER GRID
-        Language alphabet × 1
-
-    ROUTE 2 — WORD GRID
-        Language alphabet × alphabet
-
-    ROUTE 3 — FULL-TEXT / STORAGE GRID
-        Independent 64-row GSP storage dimension
-
-
-Responsibilities
-----------------
-
-MemoryGrid:
-
-    - stores tokenized knowledge
-    - stores complete documents
-    - indexes letters
-    - indexes complete words
-    - places complete text into the independent GSP storage grid
-    - retrieves candidates through independent routes
-
-MemoryGrid does NOT:
-
-    - define alphabets
-    - tokenize text
-    - calculate letter indices
-    - calculate word-grid coordinates
-    - generate crawler perturbation
-    - generate GSP replica sequences
-    - rank results
-    - generate prompts
-    - generate AI responses
-
-
-Placement Architecture
-----------------------
-
+External / User / AI Text
+│
+▼
+Language Detection
+│
+▼
 tokenizer.py
-    owns linguistic token representation
-
-placement.py
-    owns placement mode and placement identity
-
-keyboard.py
-    owns keyboard-derived L/S/c calculations
-    where applicable
-
+│
+├── normalization
+├── language mapping
+├── linguistic phase
+└── tokenization
+│
+▼
+placement / keyboard
+│
+▼
 MemoryGrid
-    consumes placement results for storage.
+46 × 64
+│
+├── documents
+├── tokens
+├── storage cells
+└── word cells
+│
+▼
+Crawler rooters
+│
+├── GridCrawler
+├── WebCrawler
+├── other crawlers
+└── CrawlerRetrieval
 
+RESPONSIBILITIES
+
+MemoryGrid owns:
+
+- canonical multilingual grid dimensions
+- document storage
+- token storage
+- language preservation
+- document metadata
+- document identity
+- token identity
+- calling tokenizer.py
+- receiving placement information
+- storage lookup
+
+MemoryGrid does NOT own:
+
+- crawler K mathematics
+- crawler D mathematics
+- backward perturbations
+- Elastic Cloud traversal
+- external HTTP acquisition
+- ranking
+- WordChain
+- WordUnderstanding
+- AI generation
 
 IMPORTANT
----------
 
-For full-text storage:
+GridCrawler is a rooter.
 
-    placement.py determines:
+WebCrawler is an acquisition crawler.
 
-        L
-        S
-        c
-        start_row
+MemoryGrid is the shared spatial memory they enter and operate upon.
 
-The randomized UID-derived S used for full-text storage
-is preserved through placement.py.
+The canonical grid is:
 
-MemoryGrid does not generate that UID.
+46 columns
+64 rows
 
-K and D remain outside MemoryGrid.
+The 46-column width exists because the multilingual tokenizer
+can produce language phases beyond the original 26-column alphabet
+space.
 
-They belong to crawler/grid traversal and replication logic.
+Crawler traversal must therefore use MemoryGrid.cols rather than
+assuming 26 columns.
 """
 
+from future import annotations
 
-from __future__ import annotations
+import hashlib
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+============================================================================
 
-from typing import (
-    List,
-    Dict,
-    Any,
-    Optional,
-)
+OPTIONAL LANGUAGE DETECTION
 
+============================================================================
 
-# =====================================================================
-# TOKENIZER
-# =====================================================================
+try:
+
+from langdetect import detect as detect_language_code
+
+except ImportError:
+
+detect_language_code = None
+
+============================================================================
+
+TOKENIZER
+
+============================================================================
 
 from tokenizer import (
-    tokenize,
-    normalize_lang,
+normalize_lang,
+tokenize,
 )
 
+============================================================================
 
-# =====================================================================
-# PLACEMENT
-# =====================================================================
+KEYBOARD / PLACEMENT
 
-from placement import (
-    place_full_text,
+============================================================================
+
+from keyboard import (
+calculate_lsum,
+calculate_ssum,
+first_letter_index,
+gsp_place,
+normalise,
 )
 
+============================================================================
 
-# =====================================================================
-# MEMORY GRID
-# =====================================================================
+GRID DIMENSIONS
+
+============================================================================
+
+GRID_ROWS = 64
+
+GRID_COLS = 46
+
+============================================================================
+
+HELPERS
+
+============================================================================
+
+def _utc_now() -> str:
+"""
+Return UTC timestamp.
+"""
+
+return datetime.now(
+    timezone.utc
+).isoformat()
+
+def _content_hash(
+text: str,
+) -> str:
+"""
+Deterministic SHA-256 content identity.
+"""
+
+value = (
+    str(text)
+    .strip()
+    .replace(
+        "\r\n",
+        "\n",
+    )
+)
+
+return hashlib.sha256(
+    value.encode(
+        "utf-8"
+    )
+).hexdigest()
+
+def _normalise_storage_row(
+row: int,
+rows: int,
+) -> int:
+"""
+Normalize row into 1-based storage coordinates.
+
+Valid rows:
+
+    1 ... rows
+"""
+
+return (
+    (
+        int(row)
+        - 1
+    )
+    % int(rows)
+) + 1
+
+def _normalise_storage_col(
+col: int,
+cols: int,
+) -> int:
+"""
+Normalize column into 0-based coordinates.
+
+Valid columns:
+
+    0 ... cols - 1
+"""
+
+return (
+    int(col)
+    % int(cols)
+)
+
+============================================================================
+
+MEMORY GRID
+
+============================================================================
 
 class MemoryGrid:
+"""
+Canonical multilingual CoMpaNeoN memory space.
+
+The MemoryGrid stores documents and their tokenizer-derived
+linguistic representation.
+
+It does not perform crawler traversal.
+
+Crawlers use this class as their shared spatial memory.
+"""
+
+# ========================================================================
+# INITIALIZATION
+# ========================================================================
+
+def __init__(
+    self,
+    rows: int = GRID_ROWS,
+    cols: int = GRID_COLS,
+) -> None:
+
+    self.rows = int(
+        rows
+    )
+
+    self.cols = int(
+        cols
+    )
+
+    if self.rows <= 0:
+
+        raise ValueError(
+            "MemoryGrid rows must be positive."
+        )
+
+    if self.cols <= 0:
+
+        raise ValueError(
+            "MemoryGrid columns must be positive."
+        )
+
+    # --------------------------------------------------------------------
+    # DOCUMENT STORAGE
+    # --------------------------------------------------------------------
+
+    self.documents: Dict[
+        int,
+        Dict[str, Any]
+    ] = {}
+
+    # --------------------------------------------------------------------
+    # CONTENT HASH INDEX
+    # --------------------------------------------------------------------
+
+    self.document_hashes: Dict[
+        str,
+        int
+    ] = {}
+
+    # --------------------------------------------------------------------
+    # TOKEN STORAGE
+    # --------------------------------------------------------------------
+
+    self.tokens: Dict[
+        int,
+        List[Dict[str, Any]]
+    ] = {}
+
+    # --------------------------------------------------------------------
+    # STORAGE ROW INDEX
+    #
+    # GridCrawler.get_tokens_at_storage(row)
+    #
+    # --------------------------------------------------------------------
+
+    self.storage_index: Dict[
+        int,
+        List[Dict[str, Any]]
+    ] = {}
+
+    # --------------------------------------------------------------------
+    # WORD / LANGUAGE GRID INDEX
+    #
+    # Coordinate:
+    #
+    #     (row, col)
+    #
+    # --------------------------------------------------------------------
+
+    self.word_index: Dict[
+        Tuple[int, int],
+        List[Dict[str, Any]]
+    ] = {}
+
+    # --------------------------------------------------------------------
+    # DOCUMENT ID COUNTER
+    # --------------------------------------------------------------------
+
+    self._next_document_id = 1
+
+    # --------------------------------------------------------------------
+    # STATISTICS
+    # --------------------------------------------------------------------
+
+    self.documents_added = 0
+
+    self.tokens_added = 0
+
+    self.duplicates_detected = 0
+
+# ========================================================================
+# LANGUAGE
+# ========================================================================
+
+def resolve_language(
+    self,
+    text: str,
+    lang: Optional[str] = None,
+) -> str:
     """
-    CoMpaNeoN Knowledge Memory Grid.
+    Resolve canonical language.
 
-    Knowledge may originate from:
+    Priority:
 
-        - user entries
-        - crawled documents
-        - background training
-        - trained datasets
-        - dictionary knowledge
-        - domain knowledge
-        - research material
-        - indexed project knowledge
-        - AI interaction
-        - approved external sources
+        1. Explicit supplied language.
+        2. langdetect.
+        3. English fallback.
 
-    Every entry is represented through three independent routes:
-
-        1. Letter Grid
-        2. Word Grid
-        3. Full-text / Storage Grid
-
-    The routes remain independent.
-
-    Tokenizer owns linguistic coordinates.
-
-    Placement owns identity-aware placement decisions.
-
-    MemoryGrid owns storage and route retrieval.
+    The final language identifier is normalized through tokenizer.py.
     """
 
-    # =================================================================
-    # INITIALIZATION
-    # =================================================================
+    if lang:
 
-    def __init__(
-        self,
-        rows: int = 64,
-        cols: int = 26,
-    ) -> None:
-
-        self.rows = int(rows)
-        self.cols = int(cols)
-
-        # -------------------------------------------------------------
-        # ROUTE 1 — LETTER GRID
-        # -------------------------------------------------------------
-
-        self.letter_grid: Dict[
-            int,
-            List[Dict[str, Any]]
-        ] = {}
-
-        # -------------------------------------------------------------
-        # ROUTE 2 — WORD GRID
-        # -------------------------------------------------------------
-
-        self.word_grid: Dict[
-            tuple[int, int],
-            List[Dict[str, Any]]
-        ] = {}
-
-        # -------------------------------------------------------------
-        # ROUTE 3 — FULL-TEXT STORAGE GRID
-        #
-        # start_row -> complete document records
-        # -------------------------------------------------------------
-
-        self.storage_grid: Dict[
-            int,
-            List[Dict[str, Any]]
-        ] = {}
-
-        # -------------------------------------------------------------
-        # COMPLETE DOCUMENT STORE
-        # -------------------------------------------------------------
-
-        self.doc_store: List[
-            Dict[str, Any]
-        ] = []
-
-    # =================================================================
-    # ROUTE 1 — LETTER GRID
-    # =================================================================
-
-    def _letter_cells(
-        self,
-        token_info: Dict[str, Any],
-    ) -> List[int]:
-
-        cells = token_info.get(
-            "letter",
-            [],
-        )
-
-        if not cells:
-            return []
-
-        return [
-            int(cell)
-            for cell in cells
-        ]
-
-    # -----------------------------------------------------------------
-
-    def _place_letter(
-        self,
-        letter_index: int,
-        record: Dict[str, Any],
-    ) -> None:
-
-        cell = int(letter_index)
-
-        if cell not in self.letter_grid:
-
-            self.letter_grid[cell] = []
-
-        self.letter_grid[cell].append(
-            record
-        )
-
-    # -----------------------------------------------------------------
-
-    def get_tokens_at_letter(
-        self,
-        letter_index: int,
-    ) -> List[Dict[str, Any]]:
-
-        return list(
-            self.letter_grid.get(
-                int(letter_index),
-                [],
-            )
-        )
-
-    # =================================================================
-    # ROUTE 2 — WORD GRID
-    # =================================================================
-
-    def _word_cell(
-        self,
-        token_info: Dict[str, Any],
-    ) -> tuple[int, int]:
-
-        word = token_info.get(
-            "word"
-        ) or {}
-
-        row = int(
-            word.get(
-                "row",
-                0,
-            )
-        )
-
-        col = int(
-            word.get(
-                "col",
-                0,
-            )
-        )
-
-        return (
-            row,
-            col,
-        )
-
-    # -----------------------------------------------------------------
-
-    def _place_word(
-        self,
-        token_info: Dict[str, Any],
-        record: Dict[str, Any],
-    ) -> None:
-
-        row, col = self._word_cell(
-            token_info
-        )
-
-        cell = (
-            row,
-            col,
-        )
-
-        if cell not in self.word_grid:
-
-            self.word_grid[cell] = []
-
-        self.word_grid[cell].append(
-            record
-        )
-
-    # -----------------------------------------------------------------
-
-    def get_tokens_at_word(
-        self,
-        row: int,
-        col: int,
-    ) -> List[Dict[str, Any]]:
-
-        return list(
-            self.word_grid.get(
-                (
-                    int(row),
-                    int(col),
-                ),
-                [],
-            )
-        )
-
-    # =================================================================
-    # ROUTE 3 — FULL-TEXT STORAGE GRID
-    # =================================================================
-
-    def _storage_gsp(
-        self,
-        text: str,
-        lang: str = "en",
-        storage_uid: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Resolve canonical full-text placement.
-
-        placement.py owns:
-
-            - full-text placement mode
-            - UID-derived S
-            - L calculation routing
-            - c preservation
-            - start-row calculation routing
-
-        MemoryGrid consumes the result.
-
-        storage_uid:
-
-            Optional externally supplied randomized UID.
-
-            If omitted, placement.py is responsible for generating
-            the randomized storage identity.
-        """
-
-        if not text:
-
-            return {
-                "L": 0,
-                "S": 0,
-                "c": 0,
-                "R": self.rows,
-                "start_row": 0,
-            }
-
-        placement = place_full_text(
-            text=text,
-            lang=lang,
-            storage_uid=storage_uid,
-            rows=self.rows,
-        )
-
-        return {
-            "L": int(
-                placement.get(
-                    "L",
-                    0,
-                )
-            ),
-
-            "S": int(
-                placement.get(
-                    "S",
-                    0,
-                )
-            ),
-
-            "c": int(
-                placement.get(
-                    "c",
-                    0,
-                )
-            ),
-
-            "R": int(
-                placement.get(
-                    "R",
-                    self.rows,
-                )
-            ),
-
-            "start_row": int(
-                placement.get(
-                    "start_row",
-                    0,
-                )
-            ),
-
-            "storage_uid": placement.get(
-                "storage_uid",
-                "",
-            ),
-        }
-
-    # -----------------------------------------------------------------
-
-    def _storage_cells(
-        self,
-        text: str,
-        lang: str = "en",
-        storage_uid: Optional[str] = None,
-    ) -> List[int]:
-
-        if not text:
-            return []
-
-        gsp = self._storage_gsp(
-            text=text,
-            lang=lang,
-            storage_uid=storage_uid,
-        )
-
-        start_row = int(
-            gsp.get(
-                "start_row",
-                0,
-            )
-        )
-
-        if start_row <= 0:
-            return []
-
-        return [
-            start_row
-        ]
-
-    # -----------------------------------------------------------------
-
-    def _place_storage(
-        self,
-        text: str,
-        lang: str,
-        record: Dict[str, Any],
-        storage_uid: Optional[str] = None,
-    ) -> None:
-
-        storage_rows = self._storage_cells(
-            text=text,
-            lang=lang,
-            storage_uid=storage_uid,
-        )
-
-        for row in storage_rows:
-
-            if row not in self.storage_grid:
-
-                self.storage_grid[row] = []
-
-            self.storage_grid[row].append(
-                record
-            )
-
-    # -----------------------------------------------------------------
-
-    def get_tokens_at_storage(
-        self,
-        row: int,
-    ) -> List[Dict[str, Any]]:
-
-        normalized_row = int(row)
-
-        if normalized_row <= 0:
-            return []
-
-        if normalized_row > self.rows:
-
-            normalized_row = (
-                (
-                    normalized_row - 1
-                )
-                % self.rows
-            ) + 1
-
-        return list(
-            self.storage_grid.get(
-                normalized_row,
-                [],
-            )
-        )
-
-    # =================================================================
-    # DOCUMENT INSERTION
-    # =================================================================
-
-    def add_document(
-        self,
-        text: str,
-        lang: str = "en",
-        source: str = "",
-        storage_uid: Optional[str] = None,
-        metadata: Optional[
-            Dict[str, Any]
-        ] = None,
-    ) -> int:
-
-        lang = normalize_lang(
+        return normalize_lang(
             lang
         )
 
-        tokens = tokenize(
+    if (
+        detect_language_code is not None
+        and str(text).strip()
+    ):
+
+        try:
+
+            detected = (
+                detect_language_code(
+                    str(text)
+                )
+            )
+
+            return normalize_lang(
+                detected
+            )
+
+        except Exception:
+
+            pass
+
+    return normalize_lang(
+        "en"
+    )
+
+# ========================================================================
+# GRID DIMENSIONS
+# ========================================================================
+
+def dimensions(
+    self,
+) -> Dict[str, int]:
+    """
+    Return canonical MemoryGrid dimensions.
+    """
+
+    return {
+        "rows": self.rows,
+        "cols": self.cols,
+    }
+
+# ========================================================================
+# CANONICAL TOKENIZER PIPELINE
+# ========================================================================
+
+def tokenize_text(
+    self,
+    text: str,
+    lang: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Send text through the canonical tokenizer pipeline.
+
+    MemoryGrid does not independently create linguistic mathematics.
+
+    tokenizer.py remains the linguistic authority.
+    """
+
+    resolved_lang = (
+        self.resolve_language(
             text,
             lang,
         )
+    )
 
-        doc_id = len(
-            self.doc_store
+    tokens = tokenize(
+        text,
+        resolved_lang,
+    )
+
+    return {
+        "text": text,
+        "language": resolved_lang,
+        "tokens": tokens,
+        "token_count": len(
+            tokens
+        ),
+    }
+
+# ========================================================================
+# TEXT PLACEMENT
+# ========================================================================
+
+def placement_for_text(
+    self,
+    text: str,
+    lang: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Resolve the canonical grid entry point for text.
+
+    IMPORTANT:
+
+    This method does NOT crawl.
+
+    It only determines where the text belongs within the
+    46 × 64 MemoryGrid.
+
+    GridCrawler later uses this entry point as the beginning of
+    its own K/D traversal.
+    """
+
+    resolved_lang = (
+        self.resolve_language(
+            text,
+            lang,
         )
-
-        metadata = metadata or {}
-
-        # -------------------------------------------------------------
-        # Resolve placement once.
-        #
-        # Important:
-        #
-        # The same placement identity must be stored with the document.
-        #
-        # This prevents retrieval from generating a new random UID.
-        # -------------------------------------------------------------
-
-        storage_gsp = self._storage_gsp(
-            text=text,
-            lang=lang,
-            storage_uid=storage_uid,
-        )
-
-        resolved_storage_uid = (
-            storage_gsp.get(
-                "storage_uid",
-                ""
-            )
-        )
-
-        # -------------------------------------------------------------
-        # DOCUMENT STORE
-        # -------------------------------------------------------------
-
-        self.doc_store.append({
-
-            "doc_id": doc_id,
-
-            "text": text,
-
-            "source": source,
-
-            "lang": lang,
-
-            "tokens": tokens,
-
-            "storage_uid": (
-                resolved_storage_uid
-            ),
-
-            "storage_gsp": (
-                storage_gsp
-            ),
-
-            "metadata": metadata,
-
-        })
-
-        # -------------------------------------------------------------
-        # TOKEN ROUTES
-        # -------------------------------------------------------------
-
-        for token in tokens:
-
-            record = {
-
-                "doc_id": doc_id,
-
-                "original": token.get(
-                    "original",
-                    "",
-                ),
-
-                "stem": token.get(
-                    "stem",
-                    "",
-                ),
-
-                "word": token.get(
-                    "word",
-                    {},
-                ),
-
-                "letter": token.get(
-                    "letter",
-                    [],
-                ),
-
-                "lang": token.get(
-                    "lang",
-                    lang,
-                ),
-
-                "source": source,
-
-            }
-
-            # ---------------------------------------------------------
-            # LETTER ROUTE
-            # ---------------------------------------------------------
-
-            for letter_idx in self._letter_cells(
-                token
-            ):
-
-                self._place_letter(
-                    letter_idx,
-                    record,
-                )
-
-            # ---------------------------------------------------------
-            # WORD ROUTE
-            # ---------------------------------------------------------
-
-            self._place_word(
-                token,
-                record,
-            )
-
-        # -------------------------------------------------------------
-        # FULL-TEXT STORAGE ROUTE
-        # -------------------------------------------------------------
-
-        document_record = {
-
-            "doc_id": doc_id,
-
-            "original": text,
-
-            "lang": lang,
-
-            "source": source,
-
-            "storage_uid": (
-                resolved_storage_uid
-            ),
-
-            "storage_gsp": (
-                storage_gsp
-            ),
-
-            "metadata": metadata,
-
-        }
-
-        start_row = int(
-            storage_gsp.get(
-                "start_row",
-                0,
-            )
-        )
-
-        if start_row > 0:
-
-            if start_row not in self.storage_grid:
-
-                self.storage_grid[
-                    start_row
-                ] = []
-
-            self.storage_grid[
-                start_row
-            ].append(
-                document_record
-            )
-
-        return doc_id
-
-    # =================================================================
-    # RETRIEVAL — ONE TOKEN
-    # =================================================================
-
-    def retrieve_by_token(
-        self,
-        token_info: Dict[str, Any],
-    ) -> Dict[
-        str,
-        List[Dict[str, Any]]
-    ]:
-
-        result = {
-
-            "letter": [],
-
-            "word": [],
-
-            "storage": [],
-
-        }
-
-        # -------------------------------------------------------------
-        # LETTER ROUTE
-        # -------------------------------------------------------------
-
-        seen_letter = set()
-
-        for letter_index in self._letter_cells(
-            token_info
-        ):
-
-            entries = self.get_tokens_at_letter(
-                letter_index
-            )
-
-            for item in entries:
-
-                key = (
-                    item.get(
-                        "doc_id"
-                    ),
-
-                    item.get(
-                        "original"
-                    ),
-                )
-
-                if key in seen_letter:
-                    continue
-
-                seen_letter.add(
-                    key
-                )
-
-                result[
-                    "letter"
-                ].append(
-                    item
-                )
-
-        # -------------------------------------------------------------
-        # WORD ROUTE
-        # -------------------------------------------------------------
-
-        word_row, word_col = self._word_cell(
-            token_info
-        )
-
-        word_entries = self.get_tokens_at_word(
-            word_row,
-            word_col,
-        )
-
-        seen_word = set()
-
-        for item in word_entries:
-
-            key = (
-                item.get(
-                    "doc_id"
-                ),
-
-                item.get(
-                    "original"
-                ),
-            )
-
-            if key in seen_word:
-                continue
-
-            seen_word.add(
-                key
-            )
-
-            result[
-                "word"
-            ].append(
-                item
-            )
-
-        # -------------------------------------------------------------
-        # STORAGE ROUTE
-        #
-        # Token may carry its originating doc_id.
-        #
-        # We use the stored document placement instead of generating
-        # a new randomized full-text UID.
-        # -------------------------------------------------------------
-
-        doc_id = token_info.get(
-            "doc_id"
-        )
-
-        if doc_id is not None:
-
-            try:
-
-                document = self.doc_store[
-                    int(doc_id)
-                ]
-
-            except (
-                IndexError,
-                ValueError,
-                TypeError,
-            ):
-
-                document = None
-
-            if document:
-
-                storage_gsp = (
-                    document.get(
-                        "storage_gsp",
-                        {}
-                    )
-                )
-
-                storage_row = int(
-                    storage_gsp.get(
-                        "start_row",
-                        0,
-                    )
-                )
-
-                if storage_row > 0:
-
-                    seen_storage = set()
-
-                    entries = (
-                        self.get_tokens_at_storage(
-                            storage_row
-                        )
-                    )
-
-                    for item in entries:
-
-                        key = (
-                            item.get(
-                                "doc_id"
-                            ),
-
-                            item.get(
-                                "original"
-                            ),
-                        )
-
-                        if key in seen_storage:
-                            continue
-
-                        seen_storage.add(
-                            key
-                        )
-
-                        result[
-                            "storage"
-                        ].append(
-                            item
-                        )
-
-        return result
-
-    # =================================================================
-    # RETRIEVAL — MULTIPLE TOKENS
-    # =================================================================
-
-    def retrieve(
-        self,
-        token_infos: List[
-            Dict[str, Any]
-        ],
-    ) -> Dict[
-        str,
-        List[Dict[str, Any]]
-    ]:
-
-        result = {
-
-            "letter": [],
-
-            "word": [],
-
-            "storage": [],
-
-        }
-
-        seen = {
-
-            "letter": set(),
-
-            "word": set(),
-
-            "storage": set(),
-
-        }
-
-        for token_info in token_infos:
-
-            routes = self.retrieve_by_token(
-                token_info
-            )
-
-            for route in (
-
-                "letter",
-
-                "word",
-
-                "storage",
-
-            ):
-
-                for item in routes[
-                    route
-                ]:
-
-                    key = (
-
-                        item.get(
-                            "doc_id"
-                        ),
-
-                        item.get(
-                            "original"
-                        ),
-                    )
-
-                    if key in seen[
-                        route
-                    ]:
-                        continue
-
-                    seen[
-                        route
-                    ].add(
-                        key
-                    )
-
-                    result[
-                        route
-                    ].append(
-                        item
-                    )
-
-        return result
-
-    # =================================================================
-    # DIRECT DOCUMENT STORAGE LOOKUP
-    # =================================================================
-
-    def retrieve_document_by_gsp(
-        self,
-        text: str,
-        lang: str = "en",
-        storage_uid: Optional[str] = None,
-    ) -> List[
+    )
+
+    normalized = normalise(
+        text,
+        resolved_lang,
+    )
+
+    Lsum = calculate_lsum(
+        normalized,
+        resolved_lang,
+    )
+
+    Ssum = calculate_ssum(
+        normalized,
+        resolved_lang,
+    )
+
+    c = first_letter_index(
+        normalized,
+        resolved_lang,
+    )
+
+    # --------------------------------------------------------------------
+    # CANONICAL PLACEMENT
+    #
+    # K and D here are neutral placement values.
+    #
+    # They do NOT represent crawler K/D traversal.
+    #
+    # Crawler K/D remains inside GridCrawler.
+    # --------------------------------------------------------------------
+
+    placement = gsp_place(
+        Lsum=Lsum,
+        Ssum=Ssum,
+        c=c,
+        K=0,
+        D=0,
+        C=self.cols,
+        R=self.rows,
+    )
+
+    start_row = int(
+        placement[
+            "start_row"
+        ]
+    )
+
+    start_col = (
+        int(c)
+        % self.cols
+    )
+
+    return {
+        "normalized": normalized,
+        "language": resolved_lang,
+        "Lsum": Lsum,
+        "Ssum": Ssum,
+        "c": c,
+        "start_row": start_row,
+        "start_col": start_col,
+        "placement": placement,
+    }
+
+# ========================================================================
+# DOCUMENT ID
+# ========================================================================
+
+def _allocate_document_id(
+    self,
+) -> int:
+
+    document_id = (
+        self._next_document_id
+    )
+
+    self._next_document_id += 1
+
+    return document_id
+
+# ========================================================================
+# ADD DOCUMENT
+# ========================================================================
+
+def add_document(
+    self,
+    text: str,
+    lang: Optional[str] = None,
+    source: str = "memory",
+    metadata: Optional[
         Dict[str, Any]
-    ]:
-        """
-        Direct lookup by canonical placement identity.
+    ] = None,
+) -> int:
+    """
+    Add a document to MemoryGrid.
 
-        If a randomized storage UID is supplied,
-        the lookup can reproduce that document's placement.
+    Pipeline:
 
-        Without the original storage UID, a randomized full-text
-        placement cannot reliably reproduce the original cell.
+        text
+          ↓
+        language resolution
+          ↓
+        tokenizer.py
+          ↓
+        canonical placement
+          ↓
+        document storage
+          ↓
+        storage row index
+          ↓
+        word/language coordinate index
 
-        Broad discovery of unknown full-text entries belongs to
-        GridCrawler.
-        """
+    Returns the canonical document ID.
+    """
 
-        lang = normalize_lang(
-            lang
+    text = str(
+        text
+    ).strip()
+
+    if not text:
+
+        raise ValueError(
+            "Cannot index empty text."
         )
 
-        if not storage_uid:
+    checksum = _content_hash(
+        text
+    )
 
-            return []
+    # --------------------------------------------------------------------
+    # DUPLICATE DETECTION
+    # --------------------------------------------------------------------
 
-        gsp = self._storage_gsp(
-            text=text,
-            lang=lang,
-            storage_uid=storage_uid,
+    existing_id = (
+        self.document_hashes.get(
+            checksum
         )
+    )
 
-        row = int(
-            gsp.get(
-                "start_row",
-                0,
-            )
+    if existing_id is not None:
+
+        self.duplicates_detected += 1
+
+        return existing_id
+
+    # --------------------------------------------------------------------
+    # TOKENIZER
+    # --------------------------------------------------------------------
+
+    token_data = (
+        self.tokenize_text(
+            text,
+            lang,
         )
+    )
 
-        if row <= 0:
-            return []
+    resolved_lang = (
+        token_data[
+            "language"
+        ]
+    )
 
-        return self.get_tokens_at_storage(
-            row
+    # --------------------------------------------------------------------
+    # CANONICAL TEXT ENTRY
+    # --------------------------------------------------------------------
+
+    placement = (
+        self.placement_for_text(
+            text,
+            resolved_lang,
         )
+    )
 
-    # =================================================================
-    # DOCUMENT ACCESS
-    # =================================================================
+    # --------------------------------------------------------------------
+    # DOCUMENT ID
+    # --------------------------------------------------------------------
 
-    def get_doc(
-        self,
-        doc_id: int,
-    ) -> str:
+    document_id = (
+        self._allocate_document_id()
+    )
 
-        try:
+    # --------------------------------------------------------------------
+    # DOCUMENT RECORD
+    # --------------------------------------------------------------------
 
-            index = int(
-                doc_id
-            )
+    document = {
 
-        except (
-            ValueError,
-            TypeError,
-        ):
+        "doc_id":
+            document_id,
 
-            return ""
+        "text":
+            text,
 
-        if not (
-            0 <= index
-            < len(
-                self.doc_store
-            )
-        ):
+        "original":
+            text,
 
-            return ""
+        "language":
+            resolved_lang,
 
-        return self.doc_store[
-            index
-        ].get(
-            "text",
-            "",
+        "lang":
+            resolved_lang,
+
+        "source":
+            source,
+
+        "content_hash":
+            checksum,
+
+        "created_at":
+            _utc_now(),
+
+        "placement":
+            placement,
+
+        "metadata":
+            metadata
+            or {},
+
+    }
+
+    self.documents[
+        document_id
+    ] = document
+
+    self.document_hashes[
+        checksum
+    ] = document_id
+
+    self.documents_added += 1
+
+    # --------------------------------------------------------------------
+    # STORAGE ROW
+    #
+    # The document itself is visible from its canonical GSP row.
+    #
+    # GridCrawler uses this as one of its rooting access paths.
+    # --------------------------------------------------------------------
+
+    storage_row = (
+        _normalise_storage_row(
+            placement[
+                "start_row"
+            ],
+            self.rows,
         )
+    )
 
-    # -----------------------------------------------------------------
+    self.storage_index.setdefault(
+        storage_row,
+        []
+    ).append(
+        document
+    )
 
-    def get_doc_tokens(
-        self,
-        doc_id: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
+    # --------------------------------------------------------------------
+    # TOKENS
+    # --------------------------------------------------------------------
 
-        try:
+    stored_tokens = []
 
-            index = int(
-                doc_id
-            )
+    for position, token in enumerate(
+        token_data[
+            "tokens"
+        ]
+    ):
 
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            return []
-
-        if not (
-            0 <= index
-            < len(
-                self.doc_store
-            )
-        ):
-
-            return []
-
-        return self.doc_store[
-            index
-        ].get(
-            "tokens",
-            [],
-        )
-
-    # -----------------------------------------------------------------
-
-    def get_doc_source(
-        self,
-        doc_id: int,
-    ) -> str:
-
-        try:
-
-            index = int(
-                doc_id
-            )
-
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            return ""
-
-        if not (
-            0 <= index
-            < len(
-                self.doc_store
-            )
-        ):
-
-            return ""
-
-        return self.doc_store[
-            index
-        ].get(
-            "source",
-            "",
-        )
-
-    # -----------------------------------------------------------------
-
-    def get_doc_language(
-        self,
-        doc_id: int,
-    ) -> str:
-
-        try:
-
-            index = int(
-                doc_id
-            )
-
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            return ""
-
-        if not (
-            0 <= index
-            < len(
-                self.doc_store
-            )
-        ):
-
-            return ""
-
-        return self.doc_store[
-            index
-        ].get(
-            "lang",
-            "en",
-        )
-
-    # =================================================================
-    # GSP DOCUMENT INFORMATION
-    # =================================================================
-
-    def get_doc_gsp(
-        self,
-        doc_id: int,
-    ) -> Dict[str, Any]:
-
-        try:
-
-            index = int(
-                doc_id
-            )
-
-        except (
-            ValueError,
-            TypeError,
-        ):
-
-            return {}
-
-        if not (
-            0 <= index
-            < len(
-                self.doc_store
-            )
-        ):
-
-            return {}
-
-        return dict(
-            self.doc_store[
-                index
-            ].get(
-                "storage_gsp",
-                {}
+        token_record = (
+            self._build_token_record(
+                token=token,
+                position=position,
+                document=document,
+                placement=placement,
             )
         )
 
-    # =================================================================
-    # GRID INSPECTION
-    # =================================================================
+        stored_tokens.append(
+            token_record
+        )
 
-    def grid_stats(
-        self,
-    ) -> Dict[str, int]:
+        self._index_token(
+            token_record
+        )
 
-        return {
+        self.tokens_added += 1
 
-            "documents": len(
-                self.doc_store
+    self.tokens[
+        document_id
+    ] = stored_tokens
+
+    return document_id
+
+# ========================================================================
+# TOKEN RECORD
+# ========================================================================
+
+def _build_token_record(
+    self,
+    token: Any,
+    position: int,
+    document: Dict[str, Any],
+    placement: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Convert tokenizer output into a MemoryGrid token record.
+
+    The tokenizer's own coordinate information is preserved when
+    available.
+
+    MemoryGrid does not invent an alternative language mapping.
+    """
+
+    if isinstance(
+        token,
+        dict,
+    ):
+
+        token_value = (
+            token.get(
+                "token"
+            )
+            or token.get(
+                "text"
+            )
+            or token.get(
+                "original"
+            )
+            or ""
+        )
+
+        token_data = dict(
+            token
+        )
+
+    else:
+
+        token_value = str(
+            token
+        )
+
+        token_data = {}
+
+    # --------------------------------------------------------------------
+    # TOKENIZER-PROVIDED COORDINATES
+    #
+    # If tokenizer later exposes canonical row/column fields,
+    # MemoryGrid consumes them.
+    #
+    # --------------------------------------------------------------------
+
+    tokenizer_row = (
+        token_data.get(
+            "row"
+        )
+        or token_data.get(
+            "storage_row"
+        )
+    )
+
+    tokenizer_col = (
+        token_data.get(
+            "col"
+        )
+        or token_data.get(
+            "column"
+        )
+        or token_data.get(
+            "phase"
+        )
+        or token_data.get(
+            "language_phase"
+        )
+    )
+
+    # --------------------------------------------------------------------
+    # FALLBACK
+    #
+    # Document canonical placement is used only if tokenizer has
+    # not yet supplied a token coordinate.
+    # --------------------------------------------------------------------
+
+    row = (
+        tokenizer_row
+        if tokenizer_row is not None
+        else placement[
+            "start_row"
+        ]
+    )
+
+    col = (
+        tokenizer_col
+        if tokenizer_col is not None
+        else placement[
+            "start_col"
+        ]
+    )
+
+    row = (
+        _normalise_storage_row(
+            row,
+            self.rows,
+        )
+    )
+
+    col = (
+        _normalise_storage_col(
+            col,
+            self.cols,
+        )
+    )
+
+    return {
+
+        "doc_id":
+            document[
+                "doc_id"
+            ],
+
+        "token":
+            token_value,
+
+        "original":
+            token_data.get(
+                "original",
+                token_value,
             ),
 
-            "letter_cells": len(
-                self.letter_grid
-            ),
+        "position":
+            position,
 
-            "word_cells": len(
-                self.word_grid
-            ),
+        "row":
+            row,
 
-            "storage_rows": len(
-                self.storage_grid
-            ),
+        "col":
+            col,
 
-            "storage_dimension": self.rows,
+        "language":
+            document[
+                "language"
+            ],
 
-        }
+        "lang":
+            document[
+                "lang"
+            ],
 
-    # =================================================================
-    # LEGACY COMPATIBILITY
-    # =================================================================
+        "source":
+            document[
+                "source"
+            ],
 
-    def get_tokens_at(
-        self,
-        row: int,
-        col: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
+        "tokenizer":
+            token_data,
 
-        return self.get_tokens_at_word(
+    }
+
+# ========================================================================
+# TOKEN INDEXING
+# ========================================================================
+
+def _index_token(
+    self,
+    token: Dict[str, Any],
+) -> None:
+    """
+    Index a token into MemoryGrid access structures.
+    """
+
+    row = int(
+        token[
+            "row"
+        ]
+    )
+
+    col = int(
+        token[
+            "col"
+        ]
+    )
+
+    # --------------------------------------------------------------------
+    # STORAGE ROW INDEX
+    # --------------------------------------------------------------------
+
+    self.storage_index.setdefault(
+        row,
+        []
+    ).append(
+        token
+    )
+
+    # --------------------------------------------------------------------
+    # WORD / LANGUAGE GRID INDEX
+    # --------------------------------------------------------------------
+
+    self.word_index.setdefault(
+        (
             row,
             col,
+        ),
+        []
+    ).append(
+        token
+    )
+
+# ========================================================================
+# STORAGE LOOKUP
+# ========================================================================
+
+def get_tokens_at_storage(
+    self,
+    row: int,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Return all documents/tokens accessible from a storage row.
+
+    Used by GridCrawler as one of its rooting access mechanisms.
+    """
+
+    row = (
+        _normalise_storage_row(
+            row,
+            self.rows,
         )
-
-
-# =====================================================================
-# DEVELOPMENT TEST
-# =====================================================================
-
-if __name__ == "__main__":
-
-    grid = MemoryGrid()
-
-    sample_text = (
-        "CoMpaNeoN deterministic "
-        "knowledge memory grid"
     )
 
-    doc_id = grid.add_document(
-        text=sample_text,
-        lang="en",
-        source="development",
+    return list(
+        self.storage_index.get(
+            row,
+            [],
+        )
     )
 
-    print(
-        "Document ID:",
-        doc_id,
-    )
+# ========================================================================
+# WORD LOOKUP
+# ========================================================================
 
-    print(
-        "Document:",
-        grid.get_doc(
-            doc_id
-        ),
-    )
+def get_tokens_at_word(
+    self,
+    row: int,
+    col: int,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Return tokens at a multilingual word-grid coordinate.
 
-    print(
-        "Document GSP:",
-        grid.get_doc_gsp(
-            doc_id
-        ),
-    )
+    Coordinates are normalized into:
 
-    print(
-        "Grid statistics:",
-        grid.grid_stats(),
-    )
+        rows: 1 ... 64
+        cols: 0 ... 45
+    """
+
+    row = (
+        _normalise_storage_row(
+    
