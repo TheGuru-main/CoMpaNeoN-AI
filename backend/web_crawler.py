@@ -2011,7 +2011,7 @@ def _video_to_documents(
 
     }
 
-    # --------------------------------------------------------------------
+# --------------------------------------------------------------------
     # VIDEO METADATA DOCUMENT
     # --------------------------------------------------------------------
 
@@ -2037,4 +2037,322 @@ def _video_to_documents(
             "text":
                 metadata_text,
 
-            
+            "url":
+                url,
+
+            "language":
+                language,
+
+            "metadata":
+                metadata,
+
+        })
+
+    # --------------------------------------------------------------------
+    # SUBTITLES
+    # --------------------------------------------------------------------
+
+    subtitles = video.get(
+        "subtitles"
+    )
+
+    if subtitles:
+
+        subtitle_text = (
+            self._normalize_subtitles(
+                subtitles
+            )
+        )
+
+        if subtitle_text:
+
+            self.transcripts_acquired += 1
+
+            documents.append({
+
+                "text":
+                    subtitle_text,
+
+                "url":
+                    url,
+
+                "language":
+                    language,
+
+                "metadata":
+                    {
+                        **metadata,
+
+                        "content_type":
+                            (
+                                "video_subtitles"
+                            ),
+
+                        "subtitles":
+                            True,
+
+                    },
+
+            })
+
+    # --------------------------------------------------------------------
+    # TRANSCRIPT
+    # --------------------------------------------------------------------
+
+    transcript = video.get(
+        "transcript"
+    )
+
+    if transcript:
+
+        self.transcripts_acquired += 1
+
+        documents.append({
+
+            "text":
+                str(
+                    transcript
+                ),
+
+            "url":
+                url,
+
+            "language":
+                language,
+
+            "metadata":
+                {
+                    **metadata,
+
+                    "content_type":
+                        (
+                            "video_transcript"
+                        ),
+
+                    "transcript":
+                        True,
+
+                },
+
+        })
+
+    return documents
+
+# ========================================================================
+# SUBTITLE NORMALIZATION
+# ========================================================================
+
+def _normalize_subtitles(
+    self,
+    subtitles: Any,
+) -> str:
+    """
+    Normalize common subtitle structures.
+    """
+
+    if isinstance(
+        subtitles,
+        str,
+    ):
+
+        return self.normalize_text(
+            subtitles
+        )
+
+    if not isinstance(
+        subtitles,
+        list,
+    ):
+
+        return ""
+
+    lines = []
+
+    for item in subtitles:
+
+        if isinstance(
+            item,
+            str,
+        ):
+
+            lines.append(
+                item
+            )
+
+        elif isinstance(
+            item,
+            dict,
+        ):
+
+            text = (
+                item.get(
+                    "text"
+                )
+                or item.get(
+                    "caption"
+                )
+                or item.get(
+                    "content"
+                )
+            )
+
+            if text:
+
+                lines.append(
+                    str(text)
+                )
+
+    return self.normalize_text(
+        " ".join(
+            lines
+        )
+    )
+
+# ========================================================================
+# YOUTUBE
+# ========================================================================
+
+async def crawl_youtube(
+    self,
+    query: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+
+    return await self.acquire_external(
+        source="youtube",
+        query=query,
+        **kwargs,
+    )
+
+# ========================================================================
+# APITUBE
+# ========================================================================
+
+async def crawl_apitube(
+    self,
+    query: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+
+    return await self.acquire_external(
+        source="apitube",
+        query=query,
+        **kwargs,
+    )
+
+# ========================================================================
+# SOURCE REGISTRY
+# ========================================================================
+
+def register_source(
+    self,
+    name: str,
+    adapter: Any,
+) -> None:
+    """
+    Register an additional external acquisition adapter.
+    """
+
+    key = (
+        str(name)
+        .strip()
+        .lower()
+    )
+
+    if not key:
+
+        raise ValueError(
+            "Source name cannot be empty."
+        )
+
+    if not callable(
+        adapter
+    ):
+
+        raise TypeError(
+            "Source adapter must be callable."
+        )
+
+    self.external_sources[
+        key
+    ] = adapter
+
+# ========================================================================
+# SOURCE INFORMATION
+# ========================================================================
+
+def available_sources(
+    self,
+) -> List[str]:
+
+    return sorted(
+        key
+        for key, adapter
+        in self.external_sources.items()
+        if callable(adapter)
+    )
+
+# ========================================================================
+# STATISTICS
+# ========================================================================
+
+def stats(
+    self,
+) -> Dict[
+    str,
+    Any
+]:
+    """
+    Return WebCrawler acquisition statistics.
+    """
+
+    return {
+
+        "pages_crawled":
+            self.pages_crawled,
+
+        "pages_cached":
+            self.pages_cached,
+
+        "pages_unchanged":
+            self.pages_unchanged,
+
+        "documents_indexed":
+            self.documents_indexed,
+
+        "tokens_indexed":
+            self.tokens_indexed,
+
+        "external_requests":
+            self.external_requests,
+
+        "external_documents":
+            self.external_documents,
+
+        "video_sources":
+            self.video_sources,
+
+        "transcripts_acquired":
+            self.transcripts_acquired,
+
+        "scheduled_jobs":
+            self.scheduled_jobs,
+
+        "scheduler_runs":
+            self.scheduler_runs,
+
+        "available_sources":
+            self.available_sources(),
+
+    }
+============================================================================
+DEVELOPMENT TEST
+============================================================================
+if name == "main":
+print(
+    "CoMpaNeoN WebCrawler"
+)
+
+print(
+    "WebCrawler requires a shared MemoryGrid instance."
+)
