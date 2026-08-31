@@ -924,4 +924,956 @@ class GridCrawler:
         return results
 
     # ========================================================================
-    # WORD ROUT
+    # WORD ROUTE
+    # ========================================================================
+
+    def crawl_token_word_grid(
+        self,
+        token_info: Dict[str, Any],
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Retrieve candidates directly through the tokenizer-defined
+        Word Grid coordinate.
+        """
+
+        results: List[
+            Dict[str, Any]
+        ] = []
+
+        if not hasattr(
+            self.memory,
+            "get_tokens_at_word",
+        ):
+
+            return results
+
+        word = token_info.get(
+            "word"
+        ) or {}
+
+        row = int(
+            word.get(
+                "row",
+                0,
+            )
+        )
+
+        col = int(
+            word.get(
+                "col",
+                0,
+            )
+        )
+
+        if row < 0:
+
+            return results
+
+        entries = (
+            self.memory.get_tokens_at_word(
+                row,
+                col,
+            )
+        )
+
+        seen: Set[
+            Tuple[Any, Any]
+        ] = set()
+
+        for entry in entries:
+
+            key = _candidate_key(
+                entry
+            )
+
+            if key in seen:
+
+                continue
+
+            seen.add(
+                key
+            )
+
+            result = dict(
+                entry
+            )
+
+            result["crawl"] = {
+
+                "route": "word_grid",
+
+                "row": row,
+
+                "col": col,
+            }
+
+            results.append(
+                result
+            )
+
+        return results
+
+    # ========================================================================
+    # CRAWL ONE CELL
+    # ========================================================================
+
+    def crawl_cell(
+        self,
+        row: int,
+        col: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        row, col = _normalise_cell(
+            row,
+            col,
+            self.rows,
+            self.cols,
+        )
+
+        return self._read_cell(
+            row,
+            col,
+        )
+
+    # ========================================================================
+    # MAIN GRID CRAWL
+    # ========================================================================
+
+    def crawl(
+        self,
+        start_row: int,
+        start_col: int,
+        L: Optional[int] = None,
+        S: Optional[int] = None,
+        c: Optional[int] = None,
+        limit: int = DEFAULT_LIMIT,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Deterministic grid traversal.
+
+        Order:
+
+            canonical path
+                ↓
+            backward perturbations
+                ↓
+            Elastic Cloud
+                ↓
+            candidate collection
+        """
+
+        candidates: List[
+            Dict[str, Any]
+        ] = []
+
+        seen_candidates: Set[
+            Tuple[Any, Any]
+        ] = set()
+
+        path = self.traversal_path(
+            start_row,
+            start_col,
+        )
+
+        for position in path:
+
+            row = position[
+                "row"
+            ]
+
+            col = position[
+                "col"
+            ]
+
+            cells = [{
+
+                "row": row,
+
+                "col": col,
+
+                "source": position[
+                    "direction"
+                ],
+
+                "k": position[
+                    "k"
+                ],
+
+                "perturbation_k": position[
+                    "perturbation_k"
+                ],
+            }]
+
+            # --------------------------------------------------------------
+            # ELASTIC CLOUD
+            # --------------------------------------------------------------
+
+            if (
+                L is not None
+                and S is not None
+                and c is not None
+            ):
+
+                elastic = self.elastic_candidates(
+                    L=L,
+                    S=S,
+                    c=c,
+                )
+
+                for cloud_cell in elastic:
+
+                    cells.append({
+
+                        "row": cloud_cell[
+                            "row"
+                        ],
+
+                        "col": cloud_cell[
+                            "col"
+                        ],
+
+                        "source": "elastic",
+
+                        "k": position[
+                            "k"
+                        ],
+
+                        "perturbation_k": position[
+                            "perturbation_k"
+                        ],
+                    })
+
+            # --------------------------------------------------------------
+            # READ
+            # --------------------------------------------------------------
+
+            seen_cells: Set[
+                Tuple[int, int]
+            ] = set()
+
+            for cell in cells:
+
+                cell_key = (
+
+                    int(
+                        cell[
+                            "row"
+                        ]
+                    ),
+
+                    int(
+                        cell[
+                            "col"
+                        ]
+                    ),
+                )
+
+                if cell_key in seen_cells:
+
+                    continue
+
+                seen_cells.add(
+                    cell_key
+                )
+
+                entries = self.crawl_cell(
+                    cell[
+                        "row"
+                    ],
+
+                    cell[
+                        "col"
+                    ],
+                )
+
+                for entry in entries:
+
+                    key = _candidate_key(
+                        entry
+                    )
+
+                    if key in seen_candidates:
+
+                        continue
+
+                    seen_candidates.add(
+                        key
+                    )
+
+                    result = dict(
+                        entry
+                    )
+
+                    result["crawl"] = {
+
+                        "route": "traversal",
+
+                        "row": cell[
+                            "row"
+                        ],
+
+                        "col": cell[
+                            "col"
+                        ],
+
+                        "source": cell[
+                            "source"
+                        ],
+
+                        "k": cell[
+                            "k"
+                        ],
+
+                        "perturbation_k": cell[
+                            "perturbation_k"
+                        ],
+                    }
+
+                    candidates.append(
+                        result
+                    )
+
+                    if len(
+                        candidates
+                    ) >= limit:
+
+                        return candidates
+
+        return candidates
+
+    # ========================================================================
+    # TOKEN GSP INFORMATION
+    # ========================================================================
+
+    def token_gsp(
+        self,
+        token_info: Dict[str, Any],
+    ) -> Dict[
+        str,
+        Any
+    ]:
+        """
+        Resolve GSP information for one linguistic token.
+        """
+
+        original = token_info.get(
+            "original",
+            ""
+        )
+
+        lang = token_info.get(
+            "lang",
+            "en"
+        )
+
+        normalized = normalise(
+            original,
+            lang,
+        )
+
+        Lsum = calculate_lsum(
+            normalized,
+            lang,
+        )
+
+        Ssum = calculate_ssum(
+            normalized,
+            lang,
+        )
+
+        c = first_letter_index(
+            normalized,
+            lang,
+        )
+
+        start_row = self.canonical_start_row(
+            text=original,
+            lang=lang,
+            placement_type="token",
+        )
+
+        return {
+
+            "text": original,
+
+            "normalized": normalized,
+
+            "lang": lang,
+
+            "L": int(
+                Lsum
+            ),
+
+            "S": int(
+                Ssum
+            ),
+
+            "c": int(
+                c
+            ),
+
+            "start_row": int(
+                start_row
+            ),
+        }
+
+    # ========================================================================
+    # TOKEN CRAWL
+    # ========================================================================
+
+    def crawl_token(
+        self,
+        token_info: Dict[str, Any],
+        limit: int = DEFAULT_LIMIT,
+    ) -> Dict[
+        str,
+        Any
+    ]:
+        """
+        Crawl all independent retrieval routes for one token.
+
+        Routes:
+
+            letter
+            word_grid
+            traversal
+        """
+
+        gsp = self.token_gsp(
+            token_info
+        )
+
+        letter_candidates = (
+            self.crawl_token_letters(
+                token_info
+            )
+        )
+
+        word_candidates = (
+            self.crawl_token_word_grid(
+                token_info
+            )
+        )
+
+        traversal_candidates = self.crawl(
+            start_row=gsp[
+                "start_row"
+            ],
+
+            start_col=gsp[
+                "c"
+            ],
+
+            L=gsp[
+                "L"
+            ],
+
+            S=gsp[
+                "S"
+            ],
+
+            c=gsp[
+                "c"
+            ],
+
+            limit=limit,
+        )
+
+        return {
+
+            "token": token_info,
+
+            "gsp": gsp,
+
+            "letter": letter_candidates,
+
+            "word_grid": word_candidates,
+
+            "traversal": traversal_candidates,
+        }
+
+    # ========================================================================
+    # COMPLETE USER QUERY CRAWL
+    # ========================================================================
+
+    def crawl_query(
+        self,
+        query: str,
+        lang: str = "en",
+        uid: Optional[Any] = None,
+        workspace_id: str = "",
+        room_id: str = "",
+        limit: int = DEFAULT_LIMIT,
+    ) -> Dict[
+        str,
+        Any
+    ]:
+        """
+        Main AI query entry.
+
+        The complete query and individual tokens are both processed.
+
+        This preserves the architecture that the AI can understand:
+
+            whole text
+
+        while also understanding:
+
+            individual words
+            linguistic tokens
+            alphabet relationships
+            word-grid relationships
+            GSP storage relationships
+
+        The crawler does not decide which candidate is correct.
+
+        It returns the candidate board for:
+
+            crawler_retrieval.py
+            ranking.py
+            word_understanding.py
+            intent_analyzer.py
+            AI models
+        """
+
+        active_language = self.resolve_language(
+            lang
+        )
+
+        tokens = self.tokenize_query(
+            query,
+            active_language,
+        )
+
+        query_gsp = self.query_gsp(
+            query=query,
+            lang=active_language,
+            uid=uid,
+        )
+
+        result: Dict[
+            str,
+            Any
+        ] = {
+
+            "query": query,
+
+            "lang": active_language,
+
+            "workspace_id": workspace_id,
+
+            "room_id": room_id,
+
+            "query_gsp": query_gsp,
+
+            "tokens": tokens,
+
+            "token_routes": [],
+
+            "full_query": [],
+
+            "candidates": [],
+        }
+
+        # --------------------------------------------------------------------
+        # FULL QUERY ROUTE
+        #
+        # The complete query enters the GSP traversal independently.
+        # --------------------------------------------------------------------
+
+        full_query_candidates = self.crawl(
+
+            start_row=query_gsp[
+                "start_row"
+            ],
+
+            start_col=query_gsp[
+                "c"
+            ],
+
+            L=query_gsp[
+                "L"
+            ],
+
+            S=query_gsp[
+                "S"
+            ],
+
+            c=query_gsp[
+                "c"
+            ],
+
+            limit=limit,
+        )
+
+        result[
+            "full_query"
+        ] = full_query_candidates
+
+        # --------------------------------------------------------------------
+        # TOKEN ROUTES
+        # --------------------------------------------------------------------
+
+        for token_info in tokens:
+
+            token_result = self.crawl_token(
+                token_info,
+                limit=limit,
+            )
+
+            result[
+                "token_routes"
+            ].append(
+                token_result
+            )
+
+        # --------------------------------------------------------------------
+        # UNIFIED CANDIDATE BOARD
+        #
+        # No ranking.
+        #
+        # Deduplication only.
+        # --------------------------------------------------------------------
+
+        unified: List[
+            Dict[str, Any]
+        ] = []
+
+        seen_documents: Set[
+            Any
+        ] = set()
+
+        def add_candidate(
+            candidate: Dict[str, Any],
+        ) -> None:
+
+            doc_id = _document_key(
+                candidate
+            )
+
+            if doc_id is None:
+
+                key = _candidate_key(
+                    candidate
+                )
+
+            else:
+
+                key = doc_id
+
+            if key in seen_documents:
+
+                return
+
+            seen_documents.add(
+                key
+            )
+
+            unified.append(
+                candidate
+            )
+
+        # Full query first.
+        for candidate in full_query_candidates:
+
+            add_candidate(
+                candidate
+            )
+
+            if len(
+                unified
+            ) >= limit:
+
+                break
+
+        # Then token routes.
+        if len(
+            unified
+        ) < limit:
+
+            for token_result in result[
+                "token_routes"
+            ]:
+
+                for route_name in (
+
+                    "letter",
+
+                    "word_grid",
+
+                    "traversal",
+                ):
+
+                    for candidate in token_result[
+                        route_name
+                    ]:
+
+                        add_candidate(
+                            candidate
+                        )
+
+                        if len(
+                            unified
+                        ) >= limit:
+
+                            break
+
+                    if len(
+                        unified
+                    ) >= limit:
+
+                        break
+
+                if len(
+                    unified
+                ) >= limit:
+
+                    break
+
+        result[
+            "candidates"
+        ] = unified[
+            :limit
+        ]
+
+        return result
+
+    # ========================================================================
+    # EXTERNAL CANDIDATE INDEXING
+    # ========================================================================
+
+    def index_crawled_candidate(
+        self,
+        text: str,
+        lang: str = "en",
+        source: str = "crawler",
+    ) -> Optional[
+        int
+    ]:
+        """
+        Add newly crawled external knowledge into MemoryGrid.
+
+        The external crawler may discover information.
+
+        GridCrawler indexes it.
+
+        MemoryGrid owns the actual storage routes.
+        """
+
+        if not text:
+
+            return None
+
+        if not hasattr(
+            self.memory,
+            "add_document",
+        ):
+
+            return None
+
+        return self.memory.add_document(
+            text=text,
+            lang=lang,
+            source=source,
+        )
+
+    # ========================================================================
+    # INDEX MANY
+    # ========================================================================
+
+    def index_crawled_candidates(
+        self,
+        candidates: List[
+            Dict[str, Any]
+        ],
+        lang: str = "en",
+        source: str = "crawler",
+    ) -> List[
+        int
+    ]:
+
+        document_ids: List[
+            int
+        ] = []
+
+        for candidate in candidates:
+
+            text = (
+
+                candidate.get(
+                    "text"
+                )
+
+                or candidate.get(
+                    "content"
+                )
+
+                or candidate.get(
+                    "body"
+                )
+            )
+
+            if not text:
+
+                continue
+
+            candidate_lang = (
+
+                candidate.get(
+                    "lang"
+                )
+
+                or lang
+            )
+
+            candidate_source = (
+
+                candidate.get(
+                    "source"
+                )
+
+                or source
+            )
+
+            doc_id = self.index_crawled_candidate(
+
+                text=text,
+
+                lang=candidate_lang,
+
+                source=candidate_source,
+            )
+
+            if doc_id is not None:
+
+                document_ids.append(
+                    doc_id
+                )
+
+        return document_ids
+
+
+# ============================================================================
+# FUNCTIONAL API
+# ============================================================================
+
+def crawl(
+    memory_grid: Any,
+    start_row: int,
+    start_col: int,
+    limit: int = DEFAULT_LIMIT,
+    L: Optional[int] = None,
+    S: Optional[int] = None,
+    c: Optional[int] = None,
+    placement: Optional[Any] = None,
+) -> List[
+    Dict[str, Any]
+]:
+
+    crawler = GridCrawler(
+        memory_grid=memory_grid,
+        placement=placement,
+    )
+
+    return crawler.crawl(
+
+        start_row=start_row,
+
+        start_col=start_col,
+
+        L=L,
+
+        S=S,
+
+        c=c,
+
+        limit=limit,
+    )
+
+
+# ----------------------------------------------------------------------------
+
+def crawl_query(
+    memory_grid: Any,
+    query: str,
+    lang: str = "en",
+    uid: Optional[Any] = None,
+    workspace_id: str = "",
+    room_id: str = "",
+    limit: int = DEFAULT_LIMIT,
+    placement: Optional[Any] = None,
+) -> Dict[
+    str,
+    Any
+]:
+    """
+    Main functional API for AI query retrieval.
+    """
+
+    crawler = GridCrawler(
+        memory_grid=memory_grid,
+        placement=placement,
+    )
+
+    return crawler.crawl_query(
+
+        query=query,
+
+        lang=lang,
+
+        uid=uid,
+
+        workspace_id=workspace_id,
+
+        room_id=room_id,
+
+        limit=limit,
+    )
+
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+def crawler_config(
+) -> Dict[
+    str,
+    int
+]:
+
+    return {
+
+        "K": CRAWLER_K,
+
+        "forward_d": FORWARD_D,
+
+        "backward_k": BACKWARD_K,
+
+        "backward_d": BACKWARD_D,
+
+        "elastic_radius": ELASTIC_RADIUS,
+
+        "elastic_first_letter_radius":
+            ELASTIC_FIRST_LETTER_RADIUS,
+    }
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "CoMpaNeoN Query-Aware Grid Crawler"
+    )
+
+    print(
+        crawler_config()
+    )
