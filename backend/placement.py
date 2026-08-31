@@ -1043,6 +1043,7 @@ def place_ai_entry(
         Dict[str, Any]
     ] = None,
 ) -> PlacementResult:
+
     """
     Place AI-generated or system-generated content.
 
@@ -1062,4 +1063,273 @@ def place_ai_entry(
 
         uid=uid,
 
-        tokenizer_si
+        tokenizer_signal=tokenizer_signal,
+
+        language=language,
+
+        K=K,
+
+        D=D,
+
+        C=C,
+
+        R=R,
+
+        metadata=metadata,
+    )
+
+    result.mode = PLACEMENT_AI
+
+    result.source_type = source_type
+
+    result.metadata[
+        "placement_identity"
+    ] = "ai"
+
+    return result
+
+
+# ==============================================================================
+# TRAINING DATA PLACEMENT
+# ==============================================================================
+
+def place_training_entry(
+    *,
+    content: str,
+    training_uid: Union[
+        str,
+        int,
+    ],
+    batch_id: str,
+    model_id: str,
+    model_version: str,
+    tokenizer_signal: Union[
+        TokenPlacementSignal,
+        Dict[str, Any],
+        None,
+    ] = None,
+    language: str = "en",
+    K: int = 5,
+    D: int = 8,
+    C: int = ENGLISH_COLUMNS,
+    R: int = GRID_ROWS,
+    metadata: Optional[
+        Dict[str, Any]
+    ] = None,
+) -> PlacementResult:
+    """
+    Prepare training-data placement.
+
+    This connects to the established training architecture where:
+
+        - training data enters the grid
+        - training batches are versioned
+        - trained models reference training data
+        - model versions are traceable
+
+    MemoryGrid remains responsible for persistence.
+    """
+
+    final_metadata = {
+        "batch_id": batch_id,
+
+        "model_id": model_id,
+
+        "model_version": model_version,
+
+        "placement_identity": (
+            "training"
+        ),
+    }
+
+    if metadata:
+
+        final_metadata.update(
+            metadata
+        )
+
+    result = place_full_text(
+        text=content,
+
+        uid=training_uid,
+
+        tokenizer_signal=tokenizer_signal,
+
+        language=language,
+
+        K=K,
+
+        D=D,
+
+        C=C,
+
+        R=R,
+
+        metadata=final_metadata,
+    )
+
+    result.mode = PLACEMENT_TRAINING
+
+    result.source_type = (
+        "training_data"
+    )
+
+    return result
+
+
+# ==============================================================================
+# EXTERNAL / CRAWLER ENTRY
+# ==============================================================================
+
+def place_external_entry(
+    *,
+    content: str,
+    source_uid: Union[
+        str,
+        int,
+    ],
+    source_id: str,
+    source_type: str,
+    tokenizer_signal: Union[
+        TokenPlacementSignal,
+        Dict[str, Any],
+        None,
+    ] = None,
+    language: str = "en",
+    K: int = 5,
+    D: int = 8,
+    C: int = ENGLISH_COLUMNS,
+    R: int = GRID_ROWS,
+    metadata: Optional[
+        Dict[str, Any]
+    ] = None,
+) -> PlacementResult:
+    """
+    Prepare externally acquired knowledge for grid entry.
+
+    Sources may originate from:
+
+        - webcrawler.py
+        - gridcrawler.py retrieval flows
+        - crawler scheduler
+        - approved external sources
+
+    Crawlers own acquisition.
+
+    placement.py only prepares grid placement.
+    """
+
+    final_metadata = {
+        "source_id": source_id,
+
+        "external_source_type": (
+            source_type
+        ),
+
+        "placement_identity": (
+            "external"
+        ),
+    }
+
+    if metadata:
+
+        final_metadata.update(
+            metadata
+        )
+
+    result = place_full_text(
+        text=content,
+
+        uid=source_uid,
+
+        tokenizer_signal=tokenizer_signal,
+
+        language=language,
+
+        K=K,
+
+        D=D,
+
+        C=C,
+
+        R=R,
+
+        metadata=final_metadata,
+    )
+
+    result.mode = PLACEMENT_EXTERNAL
+
+    result.source_type = source_type
+
+    return result
+
+
+# ==============================================================================
+# GENERIC DISPATCHER
+# ==============================================================================
+
+def prepare_placement(
+    *,
+    mode: str,
+    **kwargs: Any,
+) -> PlacementResult:
+    """
+    Generic placement dispatcher.
+
+    This allows upstream systems to request placement without
+    directly importing every placement function.
+    """
+
+    mode = mode.strip().lower()
+
+    if mode == PLACEMENT_USER:
+
+        return place_user(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_MESSAGE_BOX:
+
+        return place_message_box(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_ROOM_MESSAGE:
+
+        return place_room_message(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_FULL_TEXT:
+
+        return place_full_text(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_TOKEN:
+
+        return place_token(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_AI:
+
+        return place_ai_entry(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_TRAINING:
+
+        return place_training_entry(
+            **kwargs
+        )
+
+    if mode == PLACEMENT_EXTERNAL:
+
+        return place_external_entry(
+            **kwargs
+        )
+
+    raise ValueError(
+        f"Unsupported placement mode: {mode}"
+    )
