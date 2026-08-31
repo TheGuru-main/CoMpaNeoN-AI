@@ -906,4 +906,149 @@ def message_box_parameters(
         S = decimal digit sum of uID
 
     This deliberately keeps USER placement and MESSAGE-BOX
-    placement in t
+    placement in the same architectural family.
+    """
+
+    params = user_placement_parameters(
+        name=name,
+        uid=uid,
+        lang=lang,
+    )
+
+    params["mode"] = "message_box"
+
+    return params
+
+
+# ============================================================================
+# FULL-TEXT PARAMETERS
+# ============================================================================
+
+def full_text_parameters(
+    text: str,
+    uid: str | int,
+    lang: str = "en",
+) -> dict:
+    """
+    Build placement parameters for FULL TEXT.
+
+    IMPORTANT:
+
+        The text itself is not responsible for generating S.
+
+        S comes from a randomized uID.
+
+    L and c are still derived from the text's language-aware
+    character structure.
+
+    Tokenization remains the responsibility of tokenizer.py.
+    """
+
+    normalized_text = normalise(
+        text,
+        lang,
+    )
+
+    L = calculate_lsum(
+        normalized_text,
+        lang,
+    )
+
+    S = calculate_full_text_s(
+        uid
+    )
+
+    c = first_letter_index(
+        normalized_text,
+        lang,
+    )
+
+    return {
+        "mode": "full_text",
+        "language": resolve_language(lang),
+        "L": L,
+        "S": S,
+        "c": c,
+        "randomized_uid": generate_randomized_uid(
+            uid
+        ),
+    }
+
+
+# ============================================================================
+# ELASTIC CLOUD
+# ============================================================================
+
+def elastic_cloud(
+    L: int,
+    S: int,
+    c: int,
+    radius: int = 1,
+    first_letter_radius: int = 1,
+    C: int = ENGLISH_COLUMNS,
+    R: int = GRID_ROWS,
+) -> list:
+    """
+    Return neighbouring cells for typo-tolerant search.
+    """
+
+    cloud = set()
+
+    for dc in range(
+        -first_letter_radius,
+        first_letter_radius + 1,
+    ):
+
+        c2 = (
+            c + dc
+        ) % C
+
+        for dL in range(
+            -radius,
+            radius + 1,
+        ):
+
+            for dS in range(
+                -radius,
+                radius + 1,
+            ):
+
+                if (
+                    dL == 0
+                    and dS == 0
+                    and dc == 0
+                ):
+                    continue
+
+                L2 = L + dL
+                S2 = S + dS
+
+                start_row = (
+                    (L2 + S2 - 1) % R
+                ) + 1
+
+                cloud.add(
+                    (
+                        c2,
+                        start_row,
+                    )
+                )
+
+    base_start_row = (
+        (L + S - 1) % R
+    ) + 1
+
+    cloud.add(
+        (
+            c % C,
+            base_start_row,
+        )
+    )
+
+    return [
+        {
+            "col": col,
+            "row": row,
+        }
+        for col, row in cloud
+    ]
