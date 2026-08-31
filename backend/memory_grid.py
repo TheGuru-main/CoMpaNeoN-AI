@@ -913,4 +913,384 @@ class MemoryGrid:
 
         }
 
-        for token_info in token_i
+        for token_info in token_infos:
+
+            routes = self.retrieve_by_token(
+                token_info
+            )
+
+            for route in (
+
+                "letter",
+
+                "word",
+
+                "storage",
+
+            ):
+
+                for item in routes[
+                    route
+                ]:
+
+                    key = (
+
+                        item.get(
+                            "doc_id"
+                        ),
+
+                        item.get(
+                            "original"
+                        ),
+                    )
+
+                    if key in seen[
+                        route
+                    ]:
+                        continue
+
+                    seen[
+                        route
+                    ].add(
+                        key
+                    )
+
+                    result[
+                        route
+                    ].append(
+                        item
+                    )
+
+        return result
+
+    # =================================================================
+    # DIRECT DOCUMENT STORAGE LOOKUP
+    # =================================================================
+
+    def retrieve_document_by_gsp(
+        self,
+        text: str,
+        lang: str = "en",
+        storage_uid: Optional[str] = None,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Direct lookup by canonical placement identity.
+
+        If a randomized storage UID is supplied,
+        the lookup can reproduce that document's placement.
+
+        Without the original storage UID, a randomized full-text
+        placement cannot reliably reproduce the original cell.
+
+        Broad discovery of unknown full-text entries belongs to
+        GridCrawler.
+        """
+
+        lang = normalize_lang(
+            lang
+        )
+
+        if not storage_uid:
+
+            return []
+
+        gsp = self._storage_gsp(
+            text=text,
+            lang=lang,
+            storage_uid=storage_uid,
+        )
+
+        row = int(
+            gsp.get(
+                "start_row",
+                0,
+            )
+        )
+
+        if row <= 0:
+            return []
+
+        return self.get_tokens_at_storage(
+            row
+        )
+
+    # =================================================================
+    # DOCUMENT ACCESS
+    # =================================================================
+
+    def get_doc(
+        self,
+        doc_id: int,
+    ) -> str:
+
+        try:
+
+            index = int(
+                doc_id
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            return ""
+
+        if not (
+            0 <= index
+            < len(
+                self.doc_store
+            )
+        ):
+
+            return ""
+
+        return self.doc_store[
+            index
+        ].get(
+            "text",
+            "",
+        )
+
+    # -----------------------------------------------------------------
+
+    def get_doc_tokens(
+        self,
+        doc_id: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        try:
+
+            index = int(
+                doc_id
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            return []
+
+        if not (
+            0 <= index
+            < len(
+                self.doc_store
+            )
+        ):
+
+            return []
+
+        return self.doc_store[
+            index
+        ].get(
+            "tokens",
+            [],
+        )
+
+    # -----------------------------------------------------------------
+
+    def get_doc_source(
+        self,
+        doc_id: int,
+    ) -> str:
+
+        try:
+
+            index = int(
+                doc_id
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            return ""
+
+        if not (
+            0 <= index
+            < len(
+                self.doc_store
+            )
+        ):
+
+            return ""
+
+        return self.doc_store[
+            index
+        ].get(
+            "source",
+            "",
+        )
+
+    # -----------------------------------------------------------------
+
+    def get_doc_language(
+        self,
+        doc_id: int,
+    ) -> str:
+
+        try:
+
+            index = int(
+                doc_id
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            return ""
+
+        if not (
+            0 <= index
+            < len(
+                self.doc_store
+            )
+        ):
+
+            return ""
+
+        return self.doc_store[
+            index
+        ].get(
+            "lang",
+            "en",
+        )
+
+    # =================================================================
+    # GSP DOCUMENT INFORMATION
+    # =================================================================
+
+    def get_doc_gsp(
+        self,
+        doc_id: int,
+    ) -> Dict[str, Any]:
+
+        try:
+
+            index = int(
+                doc_id
+            )
+
+        except (
+            ValueError,
+            TypeError,
+        ):
+
+            return {}
+
+        if not (
+            0 <= index
+            < len(
+                self.doc_store
+            )
+        ):
+
+            return {}
+
+        return dict(
+            self.doc_store[
+                index
+            ].get(
+                "storage_gsp",
+                {}
+            )
+        )
+
+    # =================================================================
+    # GRID INSPECTION
+    # =================================================================
+
+    def grid_stats(
+        self,
+    ) -> Dict[str, int]:
+
+        return {
+
+            "documents": len(
+                self.doc_store
+            ),
+
+            "letter_cells": len(
+                self.letter_grid
+            ),
+
+            "word_cells": len(
+                self.word_grid
+            ),
+
+            "storage_rows": len(
+                self.storage_grid
+            ),
+
+            "storage_dimension": self.rows,
+
+        }
+
+    # =================================================================
+    # LEGACY COMPATIBILITY
+    # =================================================================
+
+    def get_tokens_at(
+        self,
+        row: int,
+        col: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        return self.get_tokens_at_word(
+            row,
+            col,
+        )
+
+
+# =====================================================================
+# DEVELOPMENT TEST
+# =====================================================================
+
+if __name__ == "__main__":
+
+    grid = MemoryGrid()
+
+    sample_text = (
+        "CoMpaNeoN deterministic "
+        "knowledge memory grid"
+    )
+
+    doc_id = grid.add_document(
+        text=sample_text,
+        lang="en",
+        source="development",
+    )
+
+    print(
+        "Document ID:",
+        doc_id,
+    )
+
+    print(
+        "Document:",
+        grid.get_doc(
+            doc_id
+        ),
+    )
+
+    print(
+        "Document GSP:",
+        grid.get_doc_gsp(
+            doc_id
+        ),
+    )
+
+    print(
+        "Grid statistics:",
+        grid.grid_stats(),
+    )
