@@ -662,8 +662,8 @@ def place_full_text(
         None,
     ] = None,
     language: str = "en",
-    K: int = 5,
-    D: int = 8,
+    K: int = 0,
+    D: int = 0,
     C: int = ENGLISH_COLUMNS,
     R: int = GRID_ROWS,
     metadata: Optional[
