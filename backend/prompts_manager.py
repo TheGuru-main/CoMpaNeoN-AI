@@ -650,4 +650,783 @@ PROMPTS: Dict[str, str] = {
         + MEMORY_AWARE_DIRECTIVE
         + ITERATIVE_DIRECTIVE
 
-        + "You are a prof
+        + "You are a professional news summariser. "
+
+        + "The user is in {country} and speaks {language}. "
+
+        + "Temperament: {temperament}. "
+
+        + "Start with the most important development, then add context. "
+
+        + "Use only supplied headlines, retrieved sources, stored knowledge, "
+          "external context, and relevant permitted context. "
+
+        + "Clearly distinguish current information from historical context. "
+
+        + "Do not present uncertain or unverified information as established "
+          "fact. "
+
+        + COMMON_CONTEXT
+
+        + "Answer:"
+    ),
+
+    "code": (
+        BASE_DIRECTIVE
+        + PROJECT_AWARE_DIRECTIVE
+        + MEMORY_AWARE_DIRECTIVE
+        + PERMISSION_DIRECTIVE
+        + LINGUISTIC_DIRECTIVE
+        + ITERATIVE_DIRECTIVE
+
+        + "You are a professional coding assistant, debugger, system designer, "
+          "data analyst, and profiler. "
+
+        + "The user is in {country} and speaks {language}. "
+
+        + "Temperament: {temperament}. "
+
+        + "Understand the user's programming language, architecture, existing "
+          "code, error, intended behaviour, and workflow before proposing "
+          "changes. "
+
+        + "Preserve the user's architecture unless the user explicitly requests "
+          "a redesign. "
+
+        + "When debugging, identify the actual error before changing unrelated "
+          "code. "
+
+        + "When producing code, ensure that it is internally consistent with the "
+          "provided project structure and established architecture. "
+
+        + "Detect accidental redesigns and dependencies affected by a proposed "
+          "change. "
+
+        + "Do not fabricate APIs, libraries, files, functions, variables, "
+          "project components, or system behavior that were not supplied or "
+          "established. "
+
+        + "Start with the most important technical finding, then add context. "
+
+        + COMMON_CONTEXT
+
+        + "Answer:"
+    ),
+
+    "conversation": (
+        BASE_DIRECTIVE
+        + MEMORY_AWARE_DIRECTIVE
+        + LINGUISTIC_DIRECTIVE
+        + ITERATIVE_DIRECTIVE
+
+        + "You are a helpful, knowledgeable, friendly, progressively educative "
+          "assistant, religious partner, friend, gist partner, and truthful "
+          "adviser. "
+
+        + "The user is in {country} and speaks {language}. "
+
+        + "Temperament: {temperament}. "
+
+        + "Understand the current request in relation to permitted conversation "
+          "history and memory context. "
+
+        + "Preserve established facts, decisions, terminology, relationships, "
+          "and workflow. "
+
+        + "Do not fabricate previous statements or project facts. "
+
+        + "Adapt naturally to the user's communication style while remaining "
+          "respectful and clear. "
+
+        + "Start naturally with the most important response, then add context "
+          "when useful. "
+
+        + COMMON_CONTEXT
+
+        + "Answer:"
+    ),
+}
+
+
+# ==============================================================================
+# EXPERT REVIEW BOARD
+# ==============================================================================
+
+PROMPTS["board_light"] = (
+    BASE_DIRECTIVE
+    + PROJECT_AWARE_DIRECTIVE
+    + MEMORY_AWARE_DIRECTIVE
+    + PERMISSION_DIRECTIVE
+    + LINGUISTIC_DIRECTIVE
+    + ITERATIVE_DIRECTIVE
+
+    + "You are a rigorous search and research expert. "
+
+    + "First formulate an evidence-based answer using the supplied sources and "
+      "permitted context. "
+
+    + "Then internally review the answer for mistakes, unsupported claims, "
+      "missing information, contradictions, ambiguity, accidental redesign, "
+      "or conflict with established context. "
+
+    + "If applicable, identify risks, limitations, dependencies, or uncertainty. "
+
+    + "Indicate confidence and distinguish highly likely conclusions from "
+      "possibilities or uncertainty. "
+
+    + "Finally produce one corrected, friendly, progressively educative answer. "
+
+    + "Do not expose private reasoning or hidden chain-of-thought. "
+
+    + "Always remain consistent with established conversation, project, memory, "
+      "and permitted organizational context. "
+
+    + COMMON_CONTEXT
+
+    + "Sources:\n{sources}\n\n"
+
+    + "Context:\n{context}\n\n"
+
+    + "Final Answer:"
+)
+
+
+PROMPTS["board"] = (
+    BASE_DIRECTIVE
+    + PROJECT_AWARE_DIRECTIVE
+    + MEMORY_AWARE_DIRECTIVE
+    + PERMISSION_DIRECTIVE
+    + LINGUISTIC_DIRECTIVE
+    + ITERATIVE_DIRECTIVE
+
+    + "You are operating as a rigorous internal expert review board. "
+
+    + "Formulate an initial evidence-based answer using the supplied and "
+      "permitted sources and context. "
+
+    + "Review the proposed answer for inaccuracies, unsupported claims, missing "
+      "points, contradictions, dependency problems, ambiguity, accidental "
+      "redesign, and uncertainty. "
+
+    + "Reconcile valid corrections into one refined answer. "
+
+    + "If applicable, mention risks, limitations, dependencies, and uncertainty. "
+
+    + "Indicate confidence and distinguish highly likely conclusions from "
+      "possible or uncertain conclusions. "
+
+    + "The final answer must be rigorous, friendly, precise, and progressively "
+      "educative. "
+
+    + "Do not expose private reasoning or hidden chain-of-thought. "
+
+    + "Always remain consistent with established conversation, project, memory, "
+      "and permitted organizational knowledge. "
+
+    + COMMON_CONTEXT
+
+    + "Sources:\n{sources}\n\n"
+
+    + "Context:\n{context}\n\n"
+
+    + "Refined Summary:"
+)
+
+
+# ==============================================================================
+# PROMPT MANAGER
+# ==============================================================================
+
+class PromptManager:
+
+    def __init__(
+        self,
+        default_country: str = "Nigeria",
+        default_language: str = "en",
+        default_temperament: str = "sanguine",
+    ) -> None:
+
+        self.default_country = default_country
+
+        self.default_language = default_language
+
+        self.default_temperament = default_temperament
+
+
+    # ==========================================================================
+    # INTENT
+    # ==========================================================================
+
+    def analyze(
+        self,
+        query: str,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run the canonical intent analyzer.
+
+        Intent analysis remains outside Prompt Manager.
+
+        Prompt Manager only consumes the result.
+        """
+
+        result = analyze_intent(
+            query=query,
+            lang=language or self.default_language,
+        )
+
+        if isinstance(
+            result,
+            dict,
+        ):
+            return result
+
+        return {
+            "intent": result,
+            "domain": detect_domain(
+                query
+            ),
+        }
+
+
+    # ==========================================================================
+    # DOMAIN
+    # ==========================================================================
+
+    def resolve_domain(
+        self,
+        query: str,
+        domain: str = "",
+        intent_data: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> str:
+
+        if (
+            domain
+            and domain.strip()
+        ):
+            return domain.strip().lower()
+
+        if intent_data:
+
+            detected = intent_data.get(
+                "domain"
+            )
+
+            if detected:
+
+                return str(
+                    detected
+                ).lower()
+
+        return detect_domain(
+            query
+        )
+
+
+    # ==========================================================================
+    # QUESTION TYPE
+    #
+    # Ownership remains outside Prompt Manager.
+    #
+    # This manager receives the canonical output.
+    # ==========================================================================
+
+    def resolve_question_type(
+        self,
+        question_type: str = "",
+        question_type_context: str = "",
+    ) -> str:
+
+        if (
+            question_type
+            and question_type.strip()
+        ):
+            return question_type.strip()
+
+        if (
+            question_type_context
+            and question_type_context.strip()
+        ):
+            return question_type_context.strip()
+
+        return ""
+
+
+    # ==========================================================================
+    # SYMBOL KNOWLEDGE
+    # ==========================================================================
+
+    def _symbol_context(
+        self,
+        query: str,
+        domain: str,
+    ) -> str:
+
+        symbols_found = recognize_symbols(
+            query,
+            domain,
+        )
+
+        if not symbols_found:
+
+            return ""
+
+        lines = [
+            "Recognized symbols:"
+        ]
+
+        for (
+            symbol,
+            meaning,
+        ) in symbols_found:
+
+            lines.append(
+                f"- {symbol}: {meaning}"
+            )
+
+        return "\n".join(
+            lines
+        )
+
+
+    # ==========================================================================
+    # CODE KNOWLEDGE
+    # ==========================================================================
+
+    def _code_context(
+        self,
+        query: str,
+    ) -> str:
+
+        query_lower = query.lower()
+
+        languages = []
+
+        terms = []
+
+        for language in PROGRAMMING_LANGUAGES:
+
+            if (
+                language.lower()
+                in query_lower
+            ):
+
+                languages.append(
+                    language
+                )
+
+        for (
+            term,
+            meaning,
+        ) in CODE_TERMS.items():
+
+            if (
+                term.lower()
+                in query_lower
+            ):
+
+                terms.append(
+                    f"{term}: {meaning}"
+                )
+
+        sections = []
+
+        if languages:
+
+            sections.append(
+                "Recognized programming "
+                "technologies/languages:\n"
+                + "\n".join(
+                    f"- {item}"
+                    for item in languages
+                )
+            )
+
+        if terms:
+
+            sections.append(
+                "Recognized coding terms:\n"
+                + "\n".join(
+                    terms
+                )
+            )
+
+        return "\n\n".join(
+            sections
+        )
+
+
+    # ==========================================================================
+    # LINGUISTIC CONTEXT
+    #
+    # Canonical linguistic engines own the actual analysis.
+    #
+    # Prompt Manager assembles their results.
+    # ==========================================================================
+
+    def build_linguistic_context(
+        self,
+        parts_of_speech_context: str = "",
+        word_understanding_context: str = "",
+        word_chain_context: str = "",
+        synonym_context: str = "",
+        antonym_context: str = "",
+        close_proxy_context: str = "",
+        global_word_context: str = "",
+        alphabet_matrix_context: str = "",
+        relationship_matrix_context: str = "",
+        word_mixer_context: str = "",
+        matrix_context: str = "",
+    ) -> str:
+
+        parts = []
+
+        context_items = (
+            (
+                "Parts of speech:",
+                parts_of_speech_context,
+            ),
+            (
+                "Word understanding:",
+                word_understanding_context,
+            ),
+            (
+                "Word chain:",
+                word_chain_context,
+            ),
+            (
+                "Synonyms:",
+                synonym_context,
+            ),
+            (
+                "Antonyms:",
+                antonym_context,
+            ),
+            (
+                "Close-proxy relationships:",
+                close_proxy_context,
+            ),
+            (
+                "Global word sensibility:",
+                global_word_context,
+            ),
+            (
+                "Alphabet matrix:",
+                alphabet_matrix_context,
+            ),
+            (
+                "Relationship matrix:",
+                relationship_matrix_context,
+            ),
+            (
+                "Word mixer:",
+                word_mixer_context,
+            ),
+            (
+                "Matrix mathematics/context:",
+                matrix_context,
+            ),
+        )
+
+        for (
+            title,
+            value,
+        ) in context_items:
+
+            if (
+                value
+                and value.strip()
+            ):
+
+                parts.append(
+                    title
+                    + "\n"
+                    + value.strip()
+                )
+
+        return "\n\n".join(
+            parts
+        )
+
+
+    # ==========================================================================
+    # KNOWLEDGE BOARD
+    # ==========================================================================
+
+    def build_knowledge_context(
+        self,
+        query: str,
+        domain: str,
+        context: str = "",
+        last_message: str = "",
+    ) -> str:
+
+        parts = []
+
+        if (
+            context
+            and context.strip()
+        ):
+
+            parts.append(
+                context.strip()
+            )
+
+        symbol_context = self._symbol_context(
+            query,
+            domain,
+        )
+
+        if symbol_context:
+
+            parts.append(
+                symbol_context
+            )
+
+        if domain == "code":
+
+            code_context = self._code_context(
+                query
+            )
+
+            if code_context:
+
+                parts.append(
+                    code_context
+                )
+
+        if (
+            last_message
+            and last_message.strip()
+        ):
+
+            parts.append(
+                "Last user message:\n"
+                + last_message.strip()
+            )
+
+        return "\n\n".join(
+            parts
+        )
+
+
+    # ==========================================================================
+    # PROJECT CONTEXT
+    # ==========================================================================
+
+    def build_project_context(
+        self,
+        workspace_name: str = "",
+        workspace_context: str = "",
+        project_name: str = "",
+        project_pin: str = "",
+        project_trace: str = "",
+        current_project_state: str = "",
+        historical_project_state: str = "",
+    ) -> Dict[
+        str,
+        str,
+    ]:
+
+        active_project_name = (
+            project_name.strip()
+            if (
+                project_name
+                and project_name.strip()
+            )
+            else workspace_name.strip()
+        )
+
+        final_workspace_context = (
+            workspace_context.strip()
+            if workspace_context
+            else ""
+        )
+
+        if active_project_name:
+
+            project_line = (
+                f"Current project: "
+                f"{active_project_name}"
+            )
+
+            if final_workspace_context:
+
+                final_workspace_context = (
+                    project_line
+                    + "\n"
+                    + final_workspace_context
+                )
+
+            else:
+
+                final_workspace_context = (
+                    project_line
+                )
+
+        return {
+
+            "workspace_context":
+                final_workspace_context,
+
+            "project_name":
+                active_project_name,
+
+            "project_pin":
+                project_pin.strip()
+                if project_pin
+                else "",
+
+            "project_trace":
+                project_trace.strip()
+                if project_trace
+                else "",
+
+            "current_project_state":
+                current_project_state.strip()
+                if current_project_state
+                else "",
+
+            "historical_project_state":
+                historical_project_state.strip()
+                if historical_project_state
+                else "",
+        }
+
+
+    # ==========================================================================
+    # MEMORY CONTEXT
+    #
+    # MemoryGrid and Memory Passport systems own retrieval and access control.
+    #
+    # Prompt Manager only receives permitted output.
+    # ==========================================================================
+
+    def build_memory_context(
+        self,
+        memory_context: str = "",
+        memory_passport: str = "",
+    ) -> Dict[
+        str,
+        str,
+    ]:
+
+        return {
+
+            "memory_context":
+                memory_context.strip()
+                if memory_context
+                else "",
+
+            "memory_passport":
+                memory_passport.strip()
+                if memory_passport
+                else "",
+        }
+
+
+    # ==========================================================================
+    # PERMISSION CONTEXT
+    #
+    # Enforcement happens before context reaches Prompt Manager.
+    # ==========================================================================
+
+    def build_permission_context(
+        self,
+        permission_context: str = "",
+    ) -> str:
+
+        return (
+            permission_context.strip()
+            if permission_context
+            else ""
+        )
+
+
+    # ==========================================================================
+    # CONFLICT AND SELF-CORRECTION
+    # ==========================================================================
+
+    def build_review_context(
+        self,
+        conflict_context: str = "",
+        self_correction_context: str = "",
+        verifier: str = "",
+    ) -> Dict[
+        str,
+        str,
+    ]:
+
+        return {
+
+            "conflict_context":
+                conflict_context.strip()
+                if conflict_context
+                else "",
+
+            "self_correction_context":
+                self_correction_context.strip()
+                if self_correction_context
+                else "",
+
+            "verifier":
+                verifier.strip()
+                if verifier
+                else "",
+        }
+
+
+    # ==========================================================================
+    # MAIN PROMPT
+    # ==========================================================================
+
+    def build_prompt(
+        self,
+        query: str,
+        context: str = "",
+        country: Optional[str] = None,
+        language: Optional[str] = None,
+        conversation_history: str = "",
+        workspace_name: str = "",
+        last_message: str = "",
+        temperament: Optional[str] = None,
+        workspace_context: str = "",
+        verifier: str = "",
+        domain: str = "",
+        intent: str = "",
+
+        # --------------------------------------------------------------
+        # QUESTION TYPE
+        # --------------------------------------------------------------
+
+        question_type: str = "",
+        question_type_context: str = "",
+
+        # --------------------------------------------------------------
+        # PROJECT
+        # --------------------------------------------------------------
+
+        project_name: str = "",
+        project_pin: str = "",
+        project_trace: str = "",
+        current_project_state: str = "",
+        historical_project_state: str = "",
+
+        # --------------------------------------------------------------
+        # MEMORY
+        # --------------------------------------------------------------
+
+        memory_context: str = "",
+        memory_passport: str = "",
+
+        # --------------------------------------------------------------
+        # PERMISSION
+        # --------------------------------------------------------------
+
+        permission_context: str = "",
+
+        # --------------------------------------------------------------
+        # LINGUISTIC ENGINE OUTPUT
+        # -
