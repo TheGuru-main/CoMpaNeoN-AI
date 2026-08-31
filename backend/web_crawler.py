@@ -985,7 +985,7 @@ def crawl(
 
     )
 
-    # --------------------------------------------------------------------
+# --------------------------------------------------------------------
     # FETCH
     # --------------------------------------------------------------------
 
@@ -1027,4 +1027,1014 @@ def crawl(
             "url":
                 url,
 
-       
+            "cached":
+                False,
+
+            "changed":
+                False,
+
+            "indexed":
+                False,
+
+            "text":
+                "",
+
+        }
+
+    self.pages_crawled += 1
+
+    # --------------------------------------------------------------------
+    # CHECKSUM
+    # --------------------------------------------------------------------
+
+    checksum = self.content_hash(
+        text
+    )
+
+    # --------------------------------------------------------------------
+    # CHANGE DETECTION
+    # --------------------------------------------------------------------
+
+    changed = (
+        self.page_cache.has_changed(
+            url,
+            text,
+        )
+    )
+
+    resolved_lang = (
+        requested_lang
+        or self.detect_language(
+            text
+        )
+    )
+
+    # --------------------------------------------------------------------
+    # UNCHANGED CONTENT
+    # --------------------------------------------------------------------
+
+    if not changed:
+
+        self.pages_unchanged += 1
+
+        return {
+
+            "url":
+                url,
+
+            "cached":
+                True,
+
+            "changed":
+                False,
+
+            "indexed":
+                False,
+
+            "language":
+                resolved_lang,
+
+            "content_hash":
+                checksum,
+
+        }
+
+    # --------------------------------------------------------------------
+    # METADATA
+    # --------------------------------------------------------------------
+
+    metadata = self.build_metadata(
+        url=url,
+        source_type=str(
+            source_type
+        ),
+        lang=resolved_lang,
+        content_hash=checksum,
+        content_type="text/html",
+    )
+
+    # --------------------------------------------------------------------
+    # MEMORYGRID INGESTION
+    # --------------------------------------------------------------------
+
+    indexed = self.acquire_document(
+        text=text,
+        url=url,
+        lang=resolved_lang,
+        source_type=str(
+            source_type
+        ),
+        metadata=metadata,
+    )
+
+    # --------------------------------------------------------------------
+    # CACHE UPDATE
+    # --------------------------------------------------------------------
+
+    self.page_cache.set(
+        url,
+        checksum,
+        text,
+    )
+
+    return {
+
+        "url":
+            url,
+
+        "cached":
+            False,
+
+        "changed":
+            True,
+
+        "language":
+            resolved_lang,
+
+        "content_hash":
+            checksum,
+
+        "indexed":
+            indexed.get(
+                "indexed",
+                False,
+            ),
+
+        "doc_id":
+            indexed.get(
+                "doc_id"
+            ),
+
+        "token_count":
+            indexed.get(
+                "token_count",
+                0,
+            ),
+
+    }
+
+# ========================================================================
+# SCHEDULING
+# ========================================================================
+
+def schedule(
+    self,
+    url: str,
+    source_type: Any = (
+        ContentType.NORMAL_WEB
+    ),
+    lang: str = "en",
+) -> Any:
+    """
+    Register a crawl job with CrawlerScheduler.
+
+    The scheduler owns timing.
+
+    WebCrawler owns acquisition.
+
+    MemoryGrid owns indexing.
+    """
+
+    self.scheduled_jobs += 1
+
+    return self.scheduler.schedule(
+        url=url,
+        source_type=source_type,
+        lang=self._resolve_language(
+            lang
+        ),
+    )
+
+# ========================================================================
+# SCHEDULE MANY
+# ========================================================================
+
+def schedule_many(
+    self,
+    urls: List[str],
+    source_type: Any = (
+        ContentType.NORMAL_WEB
+    ),
+    lang: str = "en",
+) -> List[Any]:
+    """
+    Register multiple URLs with CrawlerScheduler.
+    """
+
+    jobs = []
+
+    for url in urls:
+
+        jobs.append(
+            self.schedule(
+                url=url,
+                source_type=source_type,
+                lang=lang,
+            )
+        )
+
+    return jobs
+
+# ========================================================================
+# SCHEDULER EXECUTION
+# ========================================================================
+
+def run_scheduled(
+    self,
+    limit: Optional[
+        int
+    ] = None,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Execute scheduled crawler work.
+
+    CrawlerScheduler is intentionally flexible because its exact
+    execution API may evolve.
+
+    Supported scheduler patterns may include:
+
+        next()
+        next_job()
+        get_next()
+        pop()
+        run()
+
+    Each resolved URL is ultimately sent back through:
+
+        WebCrawler.crawl()
+            ↓
+        MemoryGrid.add_document()
+    """
+
+    self.scheduler_runs += 1
+
+    results = []
+
+    processed = 0
+
+    # --------------------------------------------------------------------
+    # DIRECT SCHEDULER RUN API
+    # --------------------------------------------------------------------
+
+    if hasattr(
+        self.scheduler,
+        "run",
+    ):
+
+        try:
+
+            scheduled_result = (
+                self.scheduler.run()
+            )
+
+            if scheduled_result is not None:
+
+                if isinstance(
+                    scheduled_result,
+                    list,
+                ):
+
+                    for item in scheduled_result:
+
+                        results.extend(
+                            self._execute_scheduled_item(
+                                item
+                            )
+                        )
+
+                        processed += 1
+
+                        if (
+                            limit is not None
+                            and processed >= limit
+                        ):
+
+                            return results
+
+                    return results
+
+        except TypeError:
+
+            pass
+
+    # --------------------------------------------------------------------
+    # QUEUE-STYLE SCHEDULER API
+    # --------------------------------------------------------------------
+
+    resolver = None
+
+    for method_name in (
+
+        "next_job",
+        "get_next",
+        "next",
+        "pop",
+
+    ):
+
+        method = getattr(
+            self.scheduler,
+            method_name,
+            None,
+        )
+
+        if callable(
+            method
+        ):
+
+            resolver = method
+
+            break
+
+    if resolver is None:
+
+        return results
+
+    while True:
+
+        if (
+            limit is not None
+            and processed >= limit
+        ):
+
+            break
+
+        try:
+
+            job = resolver()
+
+        except Exception:
+
+            break
+
+        if job is None:
+
+            break
+
+        results.extend(
+            self._execute_scheduled_item(
+                job
+            )
+        )
+
+        processed += 1
+
+    return results
+
+# ========================================================================
+# EXECUTE SCHEDULED ITEM
+# ========================================================================
+
+def _execute_scheduled_item(
+    self,
+    job: Any,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Convert a scheduler item into WebCrawler work.
+    """
+
+    if job is None:
+
+        return []
+
+    if isinstance(
+        job,
+        str,
+    ):
+
+        return [
+
+            self.crawl(
+                url=job
+            )
+
+        ]
+
+    if not isinstance(
+        job,
+        dict,
+    ):
+
+        return []
+
+    url = (
+        job.get("url")
+        or job.get(
+            "source_url"
+        )
+    )
+
+    if not url:
+
+        return []
+
+    return [
+
+        self.crawl(
+            url=url,
+            source_type=job.get(
+                "source_type",
+                ContentType.NORMAL_WEB,
+            ),
+            lang=job.get(
+                "lang"
+            ),
+        )
+
+    ]
+
+# ========================================================================
+# CRAWL MANY
+# ========================================================================
+
+def crawl_many(
+    self,
+    urls: List[str],
+    source_type: Any = (
+        ContentType.NORMAL_WEB
+    ),
+    lang: Optional[
+        str
+    ] = None,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Crawl multiple URLs directly.
+
+    Use schedule_many() when the scheduler should determine
+    execution order.
+    """
+
+    results = []
+
+    for url in urls:
+
+        results.append(
+            self.crawl(
+                url=url,
+                source_type=source_type,
+                lang=lang,
+            )
+        )
+
+    return results
+
+# ========================================================================
+# EXTERNAL SOURCE DISPATCH
+# ========================================================================
+
+async def acquire_external(
+    self,
+    source: str,
+    query: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Acquire knowledge through an external.py adapter.
+
+    External adapters own communication with external sources.
+
+    WebCrawler owns normalization and MemoryGrid ingestion.
+    """
+
+    source_key = (
+        str(source)
+        .strip()
+        .lower()
+    )
+
+    adapter = self.external_sources.get(
+        source_key
+    )
+
+    if adapter is None:
+
+        return {
+
+            "source":
+                source_key,
+
+            "query":
+                query,
+
+            "indexed":
+                False,
+
+            "error":
+                (
+                    "No external adapter "
+                    f"registered for "
+                    f"{source_key}"
+                ),
+
+        }
+
+    if not callable(
+        adapter
+    ):
+
+        return {
+
+            "source":
+                source_key,
+
+            "query":
+                query,
+
+            "indexed":
+                False,
+
+            "error":
+                (
+                    "Adapter unavailable: "
+                    f"{source_key}"
+                ),
+
+        }
+
+    self.external_requests += 1
+
+    try:
+
+        result = adapter(
+            query,
+            **kwargs,
+        )
+
+        if inspect.isawaitable(
+            result
+        ):
+
+            result = await result
+
+    except TypeError:
+
+        try:
+
+            result = adapter(
+                query
+            )
+
+            if inspect.isawaitable(
+                result
+            ):
+
+                result = await result
+
+        except Exception as exc:
+
+            return {
+
+                "source":
+                    source_key,
+
+                "query":
+                    query,
+
+                "indexed":
+                    False,
+
+                "error":
+                    str(exc),
+
+            }
+
+    except Exception as exc:
+
+        return {
+
+            "source":
+                source_key,
+
+            "query":
+                query,
+
+            "indexed":
+                False,
+
+            "error":
+                str(exc),
+
+        }
+
+    documents = (
+        self._extract_external_documents(
+            result
+        )
+    )
+
+    indexed_documents = []
+
+    for document in documents:
+
+        text = document.get(
+            "text",
+            ""
+        )
+
+        if not text:
+
+            continue
+
+        indexed = self.acquire_document(
+            text=text,
+            url=document.get(
+                "url",
+                ""
+            ),
+            lang=document.get(
+                "language"
+            ),
+            source_type=source_key,
+            metadata=document.get(
+                "metadata",
+                {}
+            ),
+        )
+
+        indexed_documents.append(
+            indexed
+        )
+
+    self.external_documents += len(
+        indexed_documents
+    )
+
+    return {
+
+        "source":
+            source_key,
+
+        "query":
+            query,
+
+        "documents":
+            indexed_documents,
+
+        "document_count":
+            len(
+                indexed_documents
+            ),
+
+        "indexed":
+            bool(
+                indexed_documents
+            ),
+
+    }
+
+# ========================================================================
+# EXTERNAL RESULT NORMALIZATION
+# ========================================================================
+
+def _extract_external_documents(
+    self,
+    result: Any,
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Convert external API response shapes into crawler documents.
+    """
+
+    documents: List[
+        Dict[str, Any]
+    ] = []
+
+    if result is None:
+
+        return documents
+
+    # --------------------------------------------------------------------
+    # DICTIONARY
+    # --------------------------------------------------------------------
+
+    if isinstance(
+        result,
+        dict,
+    ):
+
+        if result.get(
+            "text"
+        ):
+
+            documents.append({
+
+                "text":
+                    result[
+                        "text"
+                    ],
+
+                "url":
+                    result.get(
+                        "url",
+                        ""
+                    ),
+
+                "language":
+                    result.get(
+                        "language"
+                    ),
+
+                "metadata":
+                    result.get(
+                        "metadata",
+                        {}
+                    ),
+
+            })
+
+        # ----------------------------------------------------------------
+        # COLLECTION RESULTS
+        # ----------------------------------------------------------------
+
+        for key in (
+
+            "articles",
+            "ebooks",
+            "books",
+            "elibrary",
+            "code_books",
+            "results",
+            "items",
+
+        ):
+
+            items = result.get(
+                key,
+                []
+            )
+
+            if not isinstance(
+                items,
+                list,
+            ):
+
+                continue
+
+            for item in items:
+
+                if not isinstance(
+                    item,
+                    dict,
+                ):
+
+                    continue
+
+                text_parts = []
+
+                for field in (
+
+                    "title",
+                    "description",
+                    "extract",
+                    "summary",
+                    "content",
+                    "text",
+                    "author",
+
+                ):
+
+                    value = item.get(
+                        field
+                    )
+
+                    if value:
+
+                        text_parts.append(
+                            str(value)
+                        )
+
+                if not text_parts:
+
+                    continue
+
+                documents.append({
+
+                    "text":
+                        "\n".join(
+                            text_parts
+                        ),
+
+                    "url":
+                        (
+                            item.get(
+                                "url"
+                            )
+                            or item.get(
+                                "infoLink",
+                                ""
+                            )
+                        ),
+
+                    "language":
+                        item.get(
+                            "language"
+                        ),
+
+                    "metadata":
+                        {
+                            "external_record":
+                                item
+                        },
+
+                })
+
+        # ----------------------------------------------------------------
+        # VIDEO RESULTS
+        # ----------------------------------------------------------------
+
+        videos = result.get(
+            "videos",
+            []
+        )
+
+        if isinstance(
+            videos,
+            list,
+        ):
+
+            for video in videos:
+
+                if isinstance(
+                    video,
+                    dict,
+                ):
+
+                    documents.extend(
+                        self._video_to_documents(
+                            video
+                        )
+                    )
+
+        # ----------------------------------------------------------------
+        # DIRECT TRANSCRIPT
+        # ----------------------------------------------------------------
+
+        transcript = result.get(
+            "transcript"
+        )
+
+        if transcript:
+
+            documents.append({
+
+                "text":
+                    str(
+                        transcript
+                    ),
+
+                "url":
+                    result.get(
+                        "url",
+                        ""
+                    ),
+
+                "language":
+                    result.get(
+                        "language"
+                    ),
+
+                "metadata":
+                    {
+
+                        "content_type":
+                            (
+                                "video_transcript"
+                            ),
+
+                        "transcript":
+                            True,
+
+                    },
+
+            })
+
+    # --------------------------------------------------------------------
+    # LIST RESPONSE
+    # --------------------------------------------------------------------
+
+    elif isinstance(
+        result,
+        list,
+    ):
+
+        for item in result:
+
+            documents.extend(
+                self._extract_external_documents(
+                    item
+                )
+            )
+
+    return documents
+
+# ========================================================================
+# VIDEO NORMALIZATION
+# ========================================================================
+
+def _video_to_documents(
+    self,
+    video: Dict[str, Any],
+) -> List[
+    Dict[str, Any]
+]:
+    """
+    Convert video information into MemoryGrid documents.
+    """
+
+    self.video_sources += 1
+
+    documents = []
+
+    title = video.get(
+        "title",
+        ""
+    )
+
+    description = video.get(
+        "description",
+        ""
+    )
+
+    url = (
+        video.get("url")
+        or video.get(
+            "video_url",
+            ""
+        )
+    )
+
+    language = video.get(
+        "language"
+    )
+
+    metadata = {
+
+        "content_type":
+            "video",
+
+        "video_id":
+            video.get(
+                "id"
+            ),
+
+        "channel":
+            video.get(
+                "channel"
+            ),
+
+        "author":
+            video.get(
+                "author"
+            ),
+
+        "published_at":
+            video.get(
+                "published_at"
+            ),
+
+        "duration":
+            video.get(
+                "duration"
+            ),
+
+        "thumbnail":
+            video.get(
+                "thumbnail"
+            ),
+
+    }
+
+    # --------------------------------------------------------------------
+    # VIDEO METADATA DOCUMENT
+    # --------------------------------------------------------------------
+
+    metadata_text = "\n".join(
+
+        part
+
+        for part in (
+
+            title,
+            description,
+
+        )
+
+        if part
+
+    )
+
+    if metadata_text:
+
+        documents.append({
+
+            "text":
+                metadata_text,
+
+            
