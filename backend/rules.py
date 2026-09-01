@@ -15,6 +15,9 @@ RULES = {
     "structured_vocabulary": True,
     "supportive": True,
     "track_workflow": True,
+    "be_iterative" : True,
+    "be_collaborative" : True,
+    "honor_the_user_request" : True,
 
 }
 
@@ -35,10 +38,13 @@ HALLUCINATION_PATTERNS = [
 
 # Patterns that may indicate secret leaking
 SECRET_PATTERNS = [
-    "###@@@55019855199##@@@",
-    "###@@@56019855199##@@@",
-    "###@@@55019855197##@@@",
-    "###@@@55019655199##@@@",
+    "A###@@@55019655199##@@@",
+    "K#3$550198110189&26012002#",
+    "E#2$560198110199&27012001#",
+    "D#2$550198111199&26012001#",
+    "J#2$550298111129&26912001#",
+    "C#2$950128111199&26012001#",
+    "B#2$550108111199&26012201#",
     "api key",
     "secret key",
     "password",
