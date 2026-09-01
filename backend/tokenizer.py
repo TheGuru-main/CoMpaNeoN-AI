@@ -754,6 +754,7 @@ def letter_score(
     return score
 
 
+
 # =====================================================================
 # WORD SCORE
 # =====================================================================
@@ -779,4 +780,89 @@ def word_score(
         stem = qt["stem"]
         for col, row, d_stem in doc_cells:
             if stem == d_stem:
-           
+                score += 25
+            elif w["col"] == col and w["row"] == row:
+                score += 15
+            elif w["col"] == col or w["row"] == row:
+                score += 5
+    return score
+
+
+# =====================================================================
+# LANGUAGE REGISTRY HELPERS
+# =====================================================================
+
+def supported_languages() -> list[dict[str, Any]]:
+    out = []
+    for code, alpha in ALPHABETS.items():
+        if code == "default":
+            continue
+        A = len(alpha)
+        out.append({
+            "code": code,
+            "A": A,
+            "letter_grid": f"{A}x1",
+            "word_grid": f"{A}x{A}",
+            "word_R": WORD_GRID_R,
+            "key_line": KEY_LINES.get(code, KEY_LINES["default"]),
+        })
+    return out
+
+
+def language_key_mapping(lang: str | None) -> dict[str, Any]:
+    code = normalize_lang(lang)
+    alpha = alphabet_for(code)
+    key_line = key_line_for(code)
+    A = len(alpha)
+    return {
+        "code": code,
+        "alphabet": alpha,
+        "key_line": key_line,
+        "A": A,
+        "letter_grid": f"{A}x1",
+        "word_grid": f"{A}x{A}",
+        "letter_R": LETTER_GRID_R,
+        "word_R": WORD_GRID_R,
+    }
+
+
+# =====================================================================
+# TEST / DEVELOPMENT
+# =====================================================================
+
+if __name__ == "__main__":
+    print("English mapping:")
+    print(language_key_mapping("en"))
+
+    print("\nArabic mapping:")
+    print(language_key_mapping("ar"))
+
+    print("\nYoruba mapping:")
+    print(language_key_mapping("yo"))
+
+    print("\nLetter index A:")
+    print(letter_index("A", "en"))
+
+    print("\nLetter cell A:")
+    print(letter_cell("A", "en"))
+
+    print("\nFirst-letter c (apple):")
+    print(first_letter_index("apple", "en"))
+
+    print("\nWord cell (deterministic):")
+    print(word_cell("deterministic", "en"))
+
+    print("\nGSP inputs:")
+    print(gsp_inputs("deterministic", "en"))
+
+    print("\nGSP start row:")
+    print(gsp_start_row("deterministic", "en"))
+
+    print("\nSymbols:")
+    print(recognize_global_symbols("Can GSP calculate x >= 10%?"))
+
+    print("\nFull-text placement config:")
+    print(full_text_placement_config())
+
+    print("\nTokenize sample:")
+    print(tokenize("jollof rice ₦500", "en"))
