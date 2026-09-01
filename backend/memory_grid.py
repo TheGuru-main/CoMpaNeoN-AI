@@ -877,3 +877,739 @@ class MemoryGrid:
         ] = stored_tokens
 
         return document_id
+
+    # ========================================================================
+    # TOKEN RECORD
+    # ========================================================================
+
+    def _build_token_record(
+        self,
+        token: Any,
+        position: int,
+        document: Dict[str, Any],
+        placement: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Preserve tokenizer information inside MemoryGrid.
+
+        The tokenizer remains authoritative for token coordinates,
+        language phases and multilingual representation.
+        """
+
+        if isinstance(
+            token,
+            dict,
+        ):
+
+            token_data = dict(
+                token
+            )
+
+            token_value = (
+                token_data.get(
+                    "token"
+                )
+                or token_data.get(
+                    "text"
+                )
+                or token_data.get(
+                    "original"
+                )
+                or ""
+            )
+
+        else:
+
+            token_data = {}
+
+            token_value = str(
+                token
+            )
+
+        # --------------------------------------------------------------------
+        # TOKENIZER ROW
+        # --------------------------------------------------------------------
+
+        tokenizer_row = (
+            token_data.get(
+                "row"
+            )
+        )
+
+        if tokenizer_row is None:
+
+            tokenizer_row = (
+                token_data.get(
+                    "storage_row"
+                )
+            )
+
+        # --------------------------------------------------------------------
+        # TOKENIZER COLUMN / PHASE
+        #
+        # This is where multilingual phases can extend beyond 26.
+        #
+        # MemoryGrid accepts tokenizer information and normalizes it into
+        # the canonical 46-column grid.
+        # --------------------------------------------------------------------
+
+        tokenizer_col = (
+            token_data.get(
+                "col"
+            )
+        )
+
+        if tokenizer_col is None:
+
+            tokenizer_col = (
+                token_data.get(
+                    "column"
+                )
+            )
+
+        if tokenizer_col is None:
+
+            tokenizer_col = (
+                token_data.get(
+                    "phase"
+                )
+            )
+
+        if tokenizer_col is None:
+
+            tokenizer_col = (
+                token_data.get(
+                    "language_phase"
+                )
+            )
+
+        # --------------------------------------------------------------------
+        # FALLBACK TO DOCUMENT ENTRY
+        # --------------------------------------------------------------------
+
+        row = (
+            tokenizer_row
+            if tokenizer_row is not None
+            else placement[
+                "start_row"
+            ]
+        )
+
+        col = (
+            tokenizer_col
+            if tokenizer_col is not None
+            else placement[
+                "start_col"
+            ]
+        )
+
+        row = (
+            _normalise_storage_row(
+                row,
+                self.rows,
+            )
+        )
+
+        col = (
+            _normalise_storage_col(
+                col,
+                self.cols,
+            )
+        )
+
+        language_phase = (
+            token_data.get(
+                "language_phase"
+            )
+        )
+
+        if language_phase is None:
+
+            language_phase = (
+                token_data.get(
+                    "phase"
+                )
+            )
+
+        if language_phase is None:
+
+            language_phase = col
+
+        return {
+
+            "doc_id":
+                document[
+                    "doc_id"
+                ],
+
+            "token":
+                token_value,
+
+            "original":
+                token_data.get(
+                    "original",
+                    token_value,
+                ),
+
+            "position":
+                position,
+
+            "row":
+                row,
+
+            "col":
+                col,
+
+            "language_phase":
+                language_phase,
+
+            "language":
+                document[
+                    "language"
+                ],
+
+            "lang":
+                document[
+                    "lang"
+                ],
+
+            "source":
+                document[
+                    "source"
+                ],
+
+            "tokenizer":
+                token_data,
+
+        }
+
+    # ========================================================================
+    # TOKEN INDEXING
+    # ========================================================================
+
+    def _index_token(
+        self,
+        token: Dict[str, Any],
+    ) -> None:
+        """
+        Index token into all MemoryGrid access structures.
+        """
+
+        row = (
+            _normalise_storage_row(
+                token[
+                    "row"
+                ],
+                self.rows,
+            )
+        )
+
+        col = (
+            _normalise_storage_col(
+                token[
+                    "col"
+                ],
+                self.cols,
+            )
+        )
+
+        phase = (
+            _normalise_storage_col(
+                token.get(
+                    "language_phase",
+                    col,
+                ),
+                self.cols,
+            )
+        )
+
+        # --------------------------------------------------------------------
+        # STORAGE ROW
+        # --------------------------------------------------------------------
+
+        self.storage_index.setdefault(
+            row,
+            [],
+        ).append(
+            token
+        )
+
+        # --------------------------------------------------------------------
+        # WORD / LANGUAGE CELL
+        # --------------------------------------------------------------------
+
+        self.word_index.setdefault(
+            (
+                row,
+                col,
+            ),
+            [],
+        ).append(
+            token
+        )
+
+        # --------------------------------------------------------------------
+        # LANGUAGE PHASE
+        # --------------------------------------------------------------------
+
+        self.phase_index.setdefault(
+            phase,
+            [],
+        ).append(
+            token
+        )
+
+    # ========================================================================
+    # STORAGE LOOKUP
+    # ========================================================================
+
+    def get_tokens_at_storage(
+        self,
+        row: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Return all entries accessible from a storage row.
+
+        Used by GridCrawler rooting.
+        """
+
+        row = (
+            _normalise_storage_row(
+                row,
+                self.rows,
+            )
+        )
+
+        return list(
+            self.storage_index.get(
+                row,
+                [],
+            )
+        )
+
+    # ========================================================================
+    # WORD LOOKUP
+    # ========================================================================
+
+    def get_tokens_at_word(
+        self,
+        row: int,
+        col: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Return tokens from a multilingual word coordinate.
+
+        Rows:
+
+            1 ... 64
+
+        Columns:
+
+            0 ... 45
+        """
+
+        row = (
+            _normalise_storage_row(
+                row,
+                self.rows,
+            )
+        )
+
+        col = (
+            _normalise_storage_col(
+                col,
+                self.cols,
+            )
+        )
+
+        return list(
+            self.word_index.get(
+                (
+                    row,
+                    col,
+                ),
+                [],
+            )
+        )
+
+    # ========================================================================
+    # LANGUAGE PHASE LOOKUP
+    # ========================================================================
+
+    def get_tokens_at_phase(
+        self,
+        phase: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Return tokens associated with a tokenizer linguistic phase.
+
+        The phase is normalized against the canonical 46-column width.
+        """
+
+        phase = (
+            _normalise_storage_col(
+                phase,
+                self.cols,
+            )
+        )
+
+        return list(
+            self.phase_index.get(
+                phase,
+                [],
+            )
+        )
+
+    # ========================================================================
+    # LEGACY LOOKUP
+    # ========================================================================
+
+    def get_tokens_at(
+        self,
+        row: int,
+        col: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Compatibility lookup for existing callers.
+        """
+
+        return self.get_tokens_at_word(
+            row,
+            col,
+        )
+
+    # ========================================================================
+    # DOCUMENT LOOKUP
+    # ========================================================================
+
+    def get_document(
+        self,
+        doc_id: int,
+    ) -> Optional[
+        Dict[str, Any]
+    ]:
+        """
+        Retrieve one document.
+        """
+
+        return self.documents.get(
+            int(doc_id)
+        )
+
+    # ========================================================================
+    # DOCUMENT TOKENS
+    # ========================================================================
+
+    def get_document_tokens(
+        self,
+        doc_id: int,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Retrieve all token records belonging to a document.
+        """
+
+        return list(
+            self.tokens.get(
+                int(doc_id),
+                [],
+            )
+        )
+
+    # ========================================================================
+    # GRID CRAWLER
+    # ========================================================================
+
+    def get_grid_crawler(
+        self,
+    ) -> Any:
+        """
+        Lazily initialize GridCrawler.
+
+        GridCrawler remains the rooter and owns:
+
+            K
+            forward_d
+            backward_k
+            backward_d
+            Elastic Cloud traversal
+        """
+
+        if self._grid_crawler is None:
+
+            from grid_crawler import (
+                GridCrawler
+            )
+
+            self._grid_crawler = (
+                GridCrawler(
+                    self
+                )
+            )
+
+        return self._grid_crawler
+
+    # ========================================================================
+    # CRAWLER SCHEDULER
+    # ========================================================================
+
+    def get_crawler_scheduler(
+        self,
+    ) -> Any:
+        """
+        Lazily initialize CrawlerScheduler.
+        """
+
+        if self._crawler_scheduler is None:
+
+            from crawler_scheduler import (
+                CrawlerScheduler
+            )
+
+            self._crawler_scheduler = (
+                CrawlerScheduler()
+            )
+
+        return self._crawler_scheduler
+
+    # ========================================================================
+    # CRAWLER RETRIEVAL
+    # ========================================================================
+
+    def get_crawler_retrieval(
+        self,
+    ) -> Any:
+        """
+        Lazily initialize CrawlerRetrieval.
+
+        The concrete retrieval API can continue evolving independently
+        without moving ranking responsibility into MemoryGrid.
+        """
+
+        if self._crawler_retrieval is None:
+
+            from crawler_retrieval import (
+                CrawlerRetrieval
+            )
+
+            self._crawler_retrieval = (
+                CrawlerRetrieval(
+                    self
+                )
+            )
+
+        return self._crawler_retrieval
+
+    # ========================================================================
+    # WEB CRAWLER
+    # ========================================================================
+
+    def get_web_crawler(
+        self,
+    ) -> Any:
+        """
+        Lazily initialize WebCrawler.
+
+        WebCrawler acquires external information and dumps documents into
+        this MemoryGrid.
+        """
+
+        if self._web_crawler is None:
+
+            from web_crawler import (
+                WebCrawler
+            )
+
+            self._web_crawler = (
+                WebCrawler(
+                    self
+                )
+            )
+
+        return self._web_crawler
+
+    # ========================================================================
+    # ROOT TEXT THROUGH GRID CRAWLER
+    # ========================================================================
+
+    def crawl_text(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+        limit: int = 250,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Root a text query through GridCrawler.
+
+        MemoryGrid provides the multilingual 46 × 64 entry.
+
+        GridCrawler then applies its own traversal rules.
+        """
+
+        placement = (
+            self.placement_for_text(
+                text,
+                lang,
+            )
+        )
+
+        crawler = (
+            self.get_grid_crawler()
+        )
+
+        self.crawler_requests += 1
+
+        return crawler.crawl(
+            start_row=placement[
+                "start_row"
+            ],
+            start_col=placement[
+                "start_col"
+            ],
+            L=placement[
+                "Lsum"
+            ],
+            S=placement[
+                "Ssum"
+            ],
+            c=placement[
+                "c"
+            ],
+            limit=limit,
+        )
+
+    # ========================================================================
+    # RETRIEVAL ENTRY
+    # ========================================================================
+
+    def retrieve(
+        self,
+        query: str,
+        lang: Optional[str] = None,
+        limit: int = 250,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Enter CoMpaNeoN retrieval through the shared MemoryGrid.
+
+        CrawlerRetrieval remains responsible for retrieval orchestration.
+        """
+
+        retrieval = (
+            self.get_crawler_retrieval()
+        )
+
+        self.retrieval_requests += 1
+
+        return retrieval.retrieve(
+            query=query,
+            lang=lang,
+            limit=limit,
+            **kwargs,
+        )
+
+    # ========================================================================
+    # STATISTICS
+    # ========================================================================
+
+    def stats(
+        self,
+    ) -> Dict[str, Any]:
+        """
+        Return MemoryGrid statistics.
+        """
+
+        return {
+
+            "rows":
+                self.rows,
+
+            "cols":
+                self.cols,
+
+            "documents":
+                len(
+                    self.documents
+                ),
+
+            "tokens":
+                self.tokens_added,
+
+            "documents_added":
+                self.documents_added,
+
+            "duplicates_detected":
+                self.duplicates_detected,
+
+            "storage_rows":
+                len(
+                    self.storage_index
+                ),
+
+            "word_cells":
+                len(
+                    self.word_index
+                ),
+
+            "language_phases":
+                len(
+                    self.phase_index
+                ),
+
+            "crawler_requests":
+                self.crawler_requests,
+
+            "retrieval_requests":
+                self.retrieval_requests,
+
+        }
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    memory = MemoryGrid()
+
+    document_id = (
+        memory.add_document(
+            text=(
+                "CoMpaNeoN is a multilingual "
+                "organizational AI architecture."
+            ),
+            lang="en",
+            source="development",
+        )
+    )
+
+    print(
+        "CoMpaNeoN MemoryGrid"
+    )
+
+    print(
+        memory.dimensions()
+    )
+
+    print(
+        {
+            "document_id":
+                document_id
+        }
+    )
+
+    print(
+        memory.stats()
+    )
