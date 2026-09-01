@@ -2,12 +2,12 @@
 CoMpaNeoN Memory Grid
 =====================
 
-Canonical multilingual spatial memory for CoMpaNeoN.
+Canonical multilingual memory space for CoMpaNeoN.
 
 ARCHITECTURE
 ------------
 
-External / User / AI Text
+User / AI / External Text
         │
         ▼
 Language Detection
@@ -15,14 +15,21 @@ Language Detection
         ▼
 tokenizer.py
         │
-        ├── normalization
+        ├── language normalization
         ├── language switching
-        ├── linguistic phase
-        ├── alphabet / symbol mapping
+        ├── alphabet mapping
+        ├── Letter Grid
+        ├── Word Grid
+        ├── symbols
         └── tokenization
         │
         ▼
 keyboard.py / placement
+        │
+        ├── Lsum
+        ├── Ssum
+        ├── c
+        └── canonical GSP entry
         │
         ▼
 MemoryGrid
@@ -33,14 +40,14 @@ MemoryGrid
         ├── storage rows
         ├── word cells
         ├── language phases
-        └── document metadata
+        ├── letter information
+        └── metadata
         │
         ▼
 Crawler Rooters
         │
         ├── GridCrawler
         ├── WebCrawler
-        ├── other crawlers
         ├── CrawlerScheduler
         └── CrawlerRetrieval
 
@@ -49,97 +56,80 @@ ARCHITECTURAL AUTHORITY
 -----------------------
 
 tokenizer.py
-    Owns:
-        - language normalization
-        - language switching
-        - linguistic representation
-        - tokenization
-        - multilingual phase information
+    Owns linguistic interpretation.
 
-keyboard.py / placement
-    Owns:
-        - canonical GSP mathematics
-        - Lsum
-        - Ssum
-        - first-letter / linguistic entry mapping
-        - canonical placement mathematics
+keyboard.py
+    Owns canonical GSP mathematics.
 
 MemoryGrid
-    Owns:
-        - 46 × 64 multilingual memory space
-        - document storage
-        - token storage
-        - metadata preservation
-        - content identity
-        - storage lookup
-        - word-grid lookup
-        - crawler integration point
+    Owns canonical memory storage and indexes.
 
 GridCrawler
     Owns:
-        - K = 250
-        - forward_d = 5
-        - backward_k = 5
-        - backward_d = 1
-        - forward traversal
-        - backward perturbations
-        - Elastic Cloud traversal
-        - rooting through MemoryGrid
+
+        K = 250
+        forward_d = 5
+        backward_k = 5
+        backward_d = 1
+
+    plus:
+
+        forward traversal
+        backward perturbation
+        Elastic Cloud
+        query rooting
 
 WebCrawler
-    Owns:
-        - external acquisition
-        - HTML/API/video acquisition
-        - transcript acquisition
-        - external content ingestion
+    Owns external acquisition.
 
 CrawlerScheduler
-    Owns:
-        - crawler scheduling
-        - crawler execution coordination
+    Owns crawl scheduling.
 
 CrawlerRetrieval
-    Owns:
-        - retrieval orchestration
-        - crawler candidate coordination
+    Owns retrieval orchestration.
 
 IMPORTANT
 ---------
 
-MemoryGrid does NOT own crawler traversal mathematics.
+MemoryGrid does NOT own crawler traversal.
 
 K and D do NOT belong to MemoryGrid.
 
 The crawlers are the rooters.
 
-The canonical multilingual grid is:
+The canonical operational memory grid is:
 
     46 columns
     64 rows
-
-All crawler column traversal must therefore use:
-
-    memory_grid.cols
-
-and must never assume 26 columns.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-from datetime import datetime, timezone
+from datetime import (
+    datetime,
+    timezone,
+)
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 
 # ============================================================================
-# OPTIONAL LANGUAGE DETECTION
+# LANGUAGE DETECTION
 # ============================================================================
 
 try:
 
-    from langdetect import detect as detect_language_code
+    from langdetect import (
+        detect as detect_language_code,
+    )
 
 except ImportError:
 
@@ -157,7 +147,7 @@ from tokenizer import (
 
 
 # ============================================================================
-# KEYBOARD / PLACEMENT
+# KEYBOARD / CANONICAL GSP
 # ============================================================================
 
 from keyboard import (
@@ -183,9 +173,6 @@ GRID_COLS = 46
 # ============================================================================
 
 def _utc_now() -> str:
-    """
-    Return current UTC timestamp.
-    """
 
     return datetime.now(
         timezone.utc
@@ -195,9 +182,6 @@ def _utc_now() -> str:
 def _content_hash(
     text: str,
 ) -> str:
-    """
-    Return deterministic SHA-256 content identity.
-    """
 
     value = (
         str(text)
@@ -215,15 +199,10 @@ def _content_hash(
     ).hexdigest()
 
 
-def _normalise_storage_row(
+def _normalise_row(
     row: int,
     rows: int,
 ) -> int:
-    """
-    Normalize into 1-based storage rows.
-
-        1 ... rows
-    """
 
     return (
         (
@@ -234,15 +213,10 @@ def _normalise_storage_row(
     ) + 1
 
 
-def _normalise_storage_col(
+def _normalise_col(
     col: int,
     cols: int,
 ) -> int:
-    """
-    Normalize into 0-based multilingual columns.
-
-        0 ... cols - 1
-    """
 
     return (
         int(col)
@@ -256,15 +230,23 @@ def _normalise_storage_col(
 
 class MemoryGrid:
     """
-    Canonical multilingual spatial memory for CoMpaNeoN.
+    Canonical multilingual spatial memory.
 
-    MemoryGrid receives text, resolves its language, sends the text
-    through tokenizer.py, receives canonical placement information,
-    and stores the resulting document and token representation.
+    MemoryGrid receives already acquired text and performs:
 
-    MemoryGrid does not perform crawler traversal.
+        language resolution
+            ↓
+        tokenizer.py
+            ↓
+        canonical GSP entry
+            ↓
+        document storage
+            ↓
+        token indexing
 
-    Crawlers root through this memory.
+    It does not perform crawler traversal.
+
+    GridCrawler remains the rooter.
     """
 
     # ========================================================================
@@ -307,7 +289,7 @@ class MemoryGrid:
         ] = {}
 
         # --------------------------------------------------------------------
-        # CONTENT HASH → DOCUMENT ID
+        # CONTENT IDENTITY
         # --------------------------------------------------------------------
 
         self.document_hashes: Dict[
@@ -316,7 +298,7 @@ class MemoryGrid:
         ] = {}
 
         # --------------------------------------------------------------------
-        # DOCUMENT ID → TOKEN RECORDS
+        # DOCUMENT TOKENS
         # --------------------------------------------------------------------
 
         self.tokens: Dict[
@@ -327,11 +309,12 @@ class MemoryGrid:
         # --------------------------------------------------------------------
         # STORAGE ROW INDEX
         #
-        # Used by crawler rooters.
+        # Used directly by GridCrawler.
         #
-        # Row:
+        # Contains both:
         #
-        #     1 ... 64
+        #   - canonical document entries
+        #   - token entries
         # --------------------------------------------------------------------
 
         self.storage_index: Dict[
@@ -340,19 +323,19 @@ class MemoryGrid:
         ] = {}
 
         # --------------------------------------------------------------------
-        # WORD / LANGUAGE GRID INDEX
+        # WORD GRID
         #
-        # Coordinate:
+        # (row, col)
         #
-        #     (row, col)
+        # row:
         #
-        # Row:
+        #   tokenizer Word Grid row
+        #   normalized into 1..64
         #
-        #     1 ... 64
+        # col:
         #
-        # Column:
-        #
-        #     0 ... 45
+        #   tokenizer c / word column
+        #   normalized into 0..45
         # --------------------------------------------------------------------
 
         self.word_index: Dict[
@@ -361,9 +344,7 @@ class MemoryGrid:
         ] = {}
 
         # --------------------------------------------------------------------
-        # LANGUAGE / PHASE INDEX
-        #
-        # Preserves multilingual tokenizer phase access.
+        # LANGUAGE / MULTILINGUAL PHASE
         # --------------------------------------------------------------------
 
         self.phase_index: Dict[
@@ -372,25 +353,37 @@ class MemoryGrid:
         ] = {}
 
         # --------------------------------------------------------------------
-        # DOCUMENT COUNTER
+        # LETTER INDEX
+        #
+        # Letter Grid information remains tokenizer-owned.
+        #
+        # MemoryGrid only preserves it for retrieval access.
+        # --------------------------------------------------------------------
+
+        self.letter_index: Dict[
+            int,
+            List[Dict[str, Any]]
+        ] = {}
+
+        # --------------------------------------------------------------------
+        # DOCUMENT ID
         # --------------------------------------------------------------------
 
         self._next_document_id = 1
 
         # --------------------------------------------------------------------
-        # CRAWLER INSTANCES
+        # CRAWLER ROOTERS
         #
-        # Lazy initialization prevents circular imports while allowing
-        # MemoryGrid to become the shared crawler integration point.
+        # Lazy initialization avoids circular imports.
         # --------------------------------------------------------------------
 
         self._grid_crawler = None
 
+        self._web_crawler = None
+
         self._crawler_scheduler = None
 
         self._crawler_retrieval = None
-
-        self._web_crawler = None
 
         # --------------------------------------------------------------------
         # STATISTICS
@@ -413,27 +406,26 @@ class MemoryGrid:
     def grid_dimensions(
         self,
     ) -> Tuple[int, int]:
-        """
-        Return:
-
-            (rows, cols)
-        """
 
         return (
             self.rows,
             self.cols,
         )
 
+    # ------------------------------------------------------------------------
+
     def dimensions(
         self,
     ) -> Dict[str, int]:
-        """
-        Return canonical grid dimensions.
-        """
 
         return {
-            "rows": self.rows,
-            "cols": self.cols,
+
+            "rows":
+                self.rows,
+
+            "cols":
+                self.cols,
+
         }
 
     # ========================================================================
@@ -446,15 +438,17 @@ class MemoryGrid:
         lang: Optional[str] = None,
     ) -> str:
         """
-        Resolve language before text enters the tokenizer and grid.
+        Resolve language before tokenizer entry.
 
         Priority:
 
-            1. Explicit language
-            2. langdetect
-            3. English fallback
+            explicit language
+                ↓
+            langdetect
+                ↓
+            English fallback
 
-        The resulting language is normalized through tokenizer.py.
+        Final normalization remains owned by tokenizer.py.
         """
 
         if lang:
@@ -463,20 +457,21 @@ class MemoryGrid:
                 lang
             )
 
-        text = str(
+        value = str(
             text
         ).strip()
 
         if (
-            detect_language_code is not None
-            and text
+            detect_language_code
+            is not None
+            and value
         ):
 
             try:
 
                 detected = (
                     detect_language_code(
-                        text
+                        value
                     )
                 )
 
@@ -493,7 +488,7 @@ class MemoryGrid:
         )
 
     # ========================================================================
-    # TOKENIZER PIPELINE
+    # TOKENIZER ENTRY
     # ========================================================================
 
     def tokenize_text(
@@ -502,11 +497,15 @@ class MemoryGrid:
         lang: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Canonical multilingual tokenizer pipeline.
+        Enter canonical tokenizer.
 
-        MemoryGrid does not recreate language mathematics.
+        MemoryGrid does not reproduce:
 
-        tokenizer.py remains the linguistic authority.
+            language switching
+            alphabet mapping
+            Letter Grid mathematics
+            Word Grid mathematics
+            symbol detection
         """
 
         resolved_lang = (
@@ -516,22 +515,31 @@ class MemoryGrid:
             )
         )
 
-        tokens = tokenize(
+        token_list = tokenize(
             text,
             resolved_lang,
         )
 
         return {
-            "text": text,
-            "language": resolved_lang,
-            "tokens": tokens,
-            "token_count": len(
-                tokens
-            ),
+
+            "text":
+                text,
+
+            "language":
+                resolved_lang,
+
+            "tokens":
+                token_list,
+
+            "token_count":
+                len(
+                    token_list
+                ),
+
         }
 
     # ========================================================================
-    # CANONICAL TEXT PLACEMENT
+    # CANONICAL FULL-TEXT ENTRY
     # ========================================================================
 
     def placement_for_text(
@@ -540,22 +548,18 @@ class MemoryGrid:
         lang: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Determine canonical MemoryGrid entry for text.
+        Calculate the canonical GSP entry.
 
-        This method does not crawl.
+        This creates the entry point.
 
-        It determines the canonical entry point into:
+        It does NOT traverse.
 
-            46 × 64 MemoryGrid
-
-        GridCrawler subsequently enters through this placement and applies:
+        GridCrawler subsequently applies:
 
             K = 250
             forward_d = 5
             backward_k = 5
             backward_d = 1
-
-        Those traversal rules remain exclusively inside GridCrawler.
         """
 
         resolved_lang = (
@@ -585,64 +589,72 @@ class MemoryGrid:
             resolved_lang,
         )
 
-        # --------------------------------------------------------------------
-        # CANONICAL PLACEMENT
-        #
-        # K=0 and D=0 here mean:
-        #
-        # placement only
-        #
-        # They are not crawler traversal values.
-        #
-        # GridCrawler owns actual K/D traversal.
-        # --------------------------------------------------------------------
-
         placement = gsp_place(
+
             Lsum=Lsum,
+
             Ssum=Ssum,
+
             c=c,
+
+            # Entry only.
+            #
+            # These are not crawler traversal values.
             K=0,
+
             D=0,
+
             C=self.cols,
+
             R=self.rows,
+
         )
 
         start_row = (
-            _normalise_storage_row(
-                int(
-                    placement[
-                        "start_row"
-                    ]
+            _normalise_row(
+                placement.get(
+                    "start_row",
+                    1,
                 ),
                 self.rows,
             )
         )
 
-        # --------------------------------------------------------------------
-        # 46-COLUMN RULE
-        #
-        # The tokenizer / linguistic authority can produce phases beyond
-        # the original alphabet width of 26.
-        #
-        # Therefore MemoryGrid normalizes against self.cols = 46.
-        # --------------------------------------------------------------------
-
         start_col = (
-            _normalise_storage_col(
+            _normalise_col(
                 c,
                 self.cols,
             )
         )
 
         return {
-            "normalized": normalized,
-            "language": resolved_lang,
-            "Lsum": Lsum,
-            "Ssum": Ssum,
-            "c": c,
-            "start_row": start_row,
-            "start_col": start_col,
-            "placement": placement,
+
+            "normalized":
+                normalized,
+
+            "language":
+                resolved_lang,
+
+            "Lsum":
+                int(Lsum),
+
+            "Ssum":
+                int(Ssum),
+
+            # Original tokenizer/keyboard linguistic c.
+            "c":
+                int(c),
+
+            "start_row":
+                start_row,
+
+            # Operational MemoryGrid column.
+            "start_col":
+                start_col,
+
+            "placement":
+                placement,
+
         }
 
     # ========================================================================
@@ -675,27 +687,23 @@ class MemoryGrid:
         ] = None,
     ) -> int:
         """
-        Add a document into canonical CoMpaNeoN memory.
+        Canonical document insertion.
 
         Pipeline:
 
             text
-              ↓
-            language detection
-              ↓
-            tokenizer.py
-              ↓
-            placement / keyboard
-              ↓
+                ↓
+            langdetect
+                ↓
+            tokenizer language switch
+                ↓
+            tokenizer token structure
+                ↓
+            keyboard canonical GSP entry
+                ↓
             MemoryGrid 46 × 64
-              ↓
-            document
-              ↓
-            storage row
-              ↓
-            tokens
-              ↓
-            word / language cells
+                ↓
+            document + token indexes
         """
 
         text = str(
@@ -748,7 +756,7 @@ class MemoryGrid:
         )
 
         # --------------------------------------------------------------------
-        # CANONICAL GRID ENTRY
+        # FULL-TEXT ENTRY
         # --------------------------------------------------------------------
 
         placement = (
@@ -818,13 +826,13 @@ class MemoryGrid:
         self.documents_added += 1
 
         # --------------------------------------------------------------------
-        # DOCUMENT STORAGE ROW
+        # FULL-TEXT STORAGE ENTRY
         #
-        # GridCrawler can root from this canonical row.
+        # GridCrawler roots through this row.
         # --------------------------------------------------------------------
 
         storage_row = (
-            _normalise_storage_row(
+            _normalise_row(
                 placement[
                     "start_row"
                 ],
@@ -855,10 +863,15 @@ class MemoryGrid:
 
             token_record = (
                 self._build_token_record(
+
                     token=token,
+
                     position=position,
+
                     document=document,
+
                     placement=placement,
+
                 )
             )
 
@@ -890,11 +903,31 @@ class MemoryGrid:
         placement: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Preserve tokenizer information inside MemoryGrid.
+        Build MemoryGrid token record directly from the actual
+        tokenizer.py structure.
 
-        The tokenizer remains authoritative for token coordinates,
-        language phases and multilingual representation.
+        tokenizer.py returns:
+
+            {
+                "original": ...,
+                "stem": ...,
+                "lang": ...,
+                "letter": [...],
+                "word": {
+                    "L": ...,
+                    "c": ...,
+                    "col": ...,
+                    "row": ...,
+                    ...
+                },
+                "symbols": [...]
+            }
         """
+
+        token_data: Dict[
+            str,
+            Any
+        ]
 
         if isinstance(
             token,
@@ -905,711 +938,8 @@ class MemoryGrid:
                 token
             )
 
-            token_value = (
-                token_data.get(
-                    "token"
-                )
-                or token_data.get(
-                    "text"
-                )
-                or token_data.get(
-                    "original"
-                )
-                or ""
-            )
-
         else:
 
-            token_data = {}
+            token_data = {
 
-            token_value = str(
-                token
-            )
-
-        # --------------------------------------------------------------------
-        # TOKENIZER ROW
-        # --------------------------------------------------------------------
-
-        tokenizer_row = (
-            token_data.get(
-                "row"
-            )
-        )
-
-        if tokenizer_row is None:
-
-            tokenizer_row = (
-                token_data.get(
-                    "storage_row"
-                )
-            )
-
-        # --------------------------------------------------------------------
-        # TOKENIZER COLUMN / PHASE
-        #
-        # This is where multilingual phases can extend beyond 26.
-        #
-        # MemoryGrid accepts tokenizer information and normalizes it into
-        # the canonical 46-column grid.
-        # --------------------------------------------------------------------
-
-        tokenizer_col = (
-            token_data.get(
-                "col"
-            )
-        )
-
-        if tokenizer_col is None:
-
-            tokenizer_col = (
-                token_data.get(
-                    "column"
-                )
-            )
-
-        if tokenizer_col is None:
-
-            tokenizer_col = (
-                token_data.get(
-                    "phase"
-                )
-            )
-
-        if tokenizer_col is None:
-
-            tokenizer_col = (
-                token_data.get(
-                    "language_phase"
-                )
-            )
-
-        # --------------------------------------------------------------------
-        # FALLBACK TO DOCUMENT ENTRY
-        # --------------------------------------------------------------------
-
-        row = (
-            tokenizer_row
-            if tokenizer_row is not None
-            else placement[
-                "start_row"
-            ]
-        )
-
-        col = (
-            tokenizer_col
-            if tokenizer_col is not None
-            else placement[
-                "start_col"
-            ]
-        )
-
-        row = (
-            _normalise_storage_row(
-                row,
-                self.rows,
-            )
-        )
-
-        col = (
-            _normalise_storage_col(
-                col,
-                self.cols,
-            )
-        )
-
-        language_phase = (
-            token_data.get(
-                "language_phase"
-            )
-        )
-
-        if language_phase is None:
-
-            language_phase = (
-                token_data.get(
-                    "phase"
-                )
-            )
-
-        if language_phase is None:
-
-            language_phase = col
-
-        return {
-
-            "doc_id":
-                document[
-                    "doc_id"
-                ],
-
-            "token":
-                token_value,
-
-            "original":
-                token_data.get(
-                    "original",
-                    token_value,
-                ),
-
-            "position":
-                position,
-
-            "row":
-                row,
-
-            "col":
-                col,
-
-            "language_phase":
-                language_phase,
-
-            "language":
-                document[
-                    "language"
-                ],
-
-            "lang":
-                document[
-                    "lang"
-                ],
-
-            "source":
-                document[
-                    "source"
-                ],
-
-            "tokenizer":
-                token_data,
-
-        }
-
-    # ========================================================================
-    # TOKEN INDEXING
-    # ========================================================================
-
-    def _index_token(
-        self,
-        token: Dict[str, Any],
-    ) -> None:
-        """
-        Index token into all MemoryGrid access structures.
-        """
-
-        row = (
-            _normalise_storage_row(
-                token[
-                    "row"
-                ],
-                self.rows,
-            )
-        )
-
-        col = (
-            _normalise_storage_col(
-                token[
-                    "col"
-                ],
-                self.cols,
-            )
-        )
-
-        phase = (
-            _normalise_storage_col(
-                token.get(
-                    "language_phase",
-                    col,
-                ),
-                self.cols,
-            )
-        )
-
-        # --------------------------------------------------------------------
-        # STORAGE ROW
-        # --------------------------------------------------------------------
-
-        self.storage_index.setdefault(
-            row,
-            [],
-        ).append(
-            token
-        )
-
-        # --------------------------------------------------------------------
-        # WORD / LANGUAGE CELL
-        # --------------------------------------------------------------------
-
-        self.word_index.setdefault(
-            (
-                row,
-                col,
-            ),
-            [],
-        ).append(
-            token
-        )
-
-        # --------------------------------------------------------------------
-        # LANGUAGE PHASE
-        # --------------------------------------------------------------------
-
-        self.phase_index.setdefault(
-            phase,
-            [],
-        ).append(
-            token
-        )
-
-    # ========================================================================
-    # STORAGE LOOKUP
-    # ========================================================================
-
-    def get_tokens_at_storage(
-        self,
-        row: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Return all entries accessible from a storage row.
-
-        Used by GridCrawler rooting.
-        """
-
-        row = (
-            _normalise_storage_row(
-                row,
-                self.rows,
-            )
-        )
-
-        return list(
-            self.storage_index.get(
-                row,
-                [],
-            )
-        )
-
-    # ========================================================================
-    # WORD LOOKUP
-    # ========================================================================
-
-    def get_tokens_at_word(
-        self,
-        row: int,
-        col: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Return tokens from a multilingual word coordinate.
-
-        Rows:
-
-            1 ... 64
-
-        Columns:
-
-            0 ... 45
-        """
-
-        row = (
-            _normalise_storage_row(
-                row,
-                self.rows,
-            )
-        )
-
-        col = (
-            _normalise_storage_col(
-                col,
-                self.cols,
-            )
-        )
-
-        return list(
-            self.word_index.get(
-                (
-                    row,
-                    col,
-                ),
-                [],
-            )
-        )
-
-    # ========================================================================
-    # LANGUAGE PHASE LOOKUP
-    # ========================================================================
-
-    def get_tokens_at_phase(
-        self,
-        phase: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Return tokens associated with a tokenizer linguistic phase.
-
-        The phase is normalized against the canonical 46-column width.
-        """
-
-        phase = (
-            _normalise_storage_col(
-                phase,
-                self.cols,
-            )
-        )
-
-        return list(
-            self.phase_index.get(
-                phase,
-                [],
-            )
-        )
-
-    # ========================================================================
-    # LEGACY LOOKUP
-    # ========================================================================
-
-    def get_tokens_at(
-        self,
-        row: int,
-        col: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Compatibility lookup for existing callers.
-        """
-
-        return self.get_tokens_at_word(
-            row,
-            col,
-        )
-
-    # ========================================================================
-    # DOCUMENT LOOKUP
-    # ========================================================================
-
-    def get_document(
-        self,
-        doc_id: int,
-    ) -> Optional[
-        Dict[str, Any]
-    ]:
-        """
-        Retrieve one document.
-        """
-
-        return self.documents.get(
-            int(doc_id)
-        )
-
-    # ========================================================================
-    # DOCUMENT TOKENS
-    # ========================================================================
-
-    def get_document_tokens(
-        self,
-        doc_id: int,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Retrieve all token records belonging to a document.
-        """
-
-        return list(
-            self.tokens.get(
-                int(doc_id),
-                [],
-            )
-        )
-
-    # ========================================================================
-    # GRID CRAWLER
-    # ========================================================================
-
-    def get_grid_crawler(
-        self,
-    ) -> Any:
-        """
-        Lazily initialize GridCrawler.
-
-        GridCrawler remains the rooter and owns:
-
-            K
-            forward_d
-            backward_k
-            backward_d
-            Elastic Cloud traversal
-        """
-
-        if self._grid_crawler is None:
-
-            from grid_crawler import (
-                GridCrawler
-            )
-
-            self._grid_crawler = (
-                GridCrawler(
-                    self
-                )
-            )
-
-        return self._grid_crawler
-
-    # ========================================================================
-    # CRAWLER SCHEDULER
-    # ========================================================================
-
-    def get_crawler_scheduler(
-        self,
-    ) -> Any:
-        """
-        Lazily initialize CrawlerScheduler.
-        """
-
-        if self._crawler_scheduler is None:
-
-            from crawler_scheduler import (
-                CrawlerScheduler
-            )
-
-            self._crawler_scheduler = (
-                CrawlerScheduler()
-            )
-
-        return self._crawler_scheduler
-
-    # ========================================================================
-    # CRAWLER RETRIEVAL
-    # ========================================================================
-
-    def get_crawler_retrieval(
-        self,
-    ) -> Any:
-        """
-        Lazily initialize CrawlerRetrieval.
-
-        The concrete retrieval API can continue evolving independently
-        without moving ranking responsibility into MemoryGrid.
-        """
-
-        if self._crawler_retrieval is None:
-
-            from crawler_retrieval import (
-                CrawlerRetrieval
-            )
-
-            self._crawler_retrieval = (
-                CrawlerRetrieval(
-                    self
-                )
-            )
-
-        return self._crawler_retrieval
-
-    # ========================================================================
-    # WEB CRAWLER
-    # ========================================================================
-
-    def get_web_crawler(
-        self,
-    ) -> Any:
-        """
-        Lazily initialize WebCrawler.
-
-        WebCrawler acquires external information and dumps documents into
-        this MemoryGrid.
-        """
-
-        if self._web_crawler is None:
-
-            from web_crawler import (
-                WebCrawler
-            )
-
-            self._web_crawler = (
-                WebCrawler(
-                    self
-                )
-            )
-
-        return self._web_crawler
-
-    # ========================================================================
-    # ROOT TEXT THROUGH GRID CRAWLER
-    # ========================================================================
-
-    def crawl_text(
-        self,
-        text: str,
-        lang: Optional[str] = None,
-        limit: int = 250,
-    ) -> List[
-        Dict[str, Any]
-    ]:
-        """
-        Root a text query through GridCrawler.
-
-        MemoryGrid provides the multilingual 46 × 64 entry.
-
-        GridCrawler then applies its own traversal rules.
-        """
-
-        placement = (
-            self.placement_for_text(
-                text,
-                lang,
-            )
-        )
-
-        crawler = (
-            self.get_grid_crawler()
-        )
-
-        self.crawler_requests += 1
-
-        return crawler.crawl(
-            start_row=placement[
-                "start_row"
-            ],
-            start_col=placement[
-                "start_col"
-            ],
-            L=placement[
-                "Lsum"
-            ],
-            S=placement[
-                "Ssum"
-            ],
-            c=placement[
-                "c"
-            ],
-            limit=limit,
-        )
-
-    # ========================================================================
-    # RETRIEVAL ENTRY
-    # ========================================================================
-
-    def retrieve(
-        self,
-        query: str,
-        lang: Optional[str] = None,
-        limit: int = 250,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Enter CoMpaNeoN retrieval through the shared MemoryGrid.
-
-        CrawlerRetrieval remains responsible for retrieval orchestration.
-        """
-
-        retrieval = (
-            self.get_crawler_retrieval()
-        )
-
-        self.retrieval_requests += 1
-
-        return retrieval.retrieve(
-            query=query,
-            lang=lang,
-            limit=limit,
-            **kwargs,
-        )
-
-    # ========================================================================
-    # STATISTICS
-    # ========================================================================
-
-    def stats(
-        self,
-    ) -> Dict[str, Any]:
-        """
-        Return MemoryGrid statistics.
-        """
-
-        return {
-
-            "rows":
-                self.rows,
-
-            "cols":
-                self.cols,
-
-            "documents":
-                len(
-                    self.documents
-                ),
-
-            "tokens":
-                self.tokens_added,
-
-            "documents_added":
-                self.documents_added,
-
-            "duplicates_detected":
-                self.duplicates_detected,
-
-            "storage_rows":
-                len(
-                    self.storage_index
-                ),
-
-            "word_cells":
-                len(
-                    self.word_index
-                ),
-
-            "language_phases":
-                len(
-                    self.phase_index
-                ),
-
-            "crawler_requests":
-                self.crawler_requests,
-
-            "retrieval_requests":
-                self.retrieval_requests,
-
-        }
-
-
-# ============================================================================
-# DEVELOPMENT TEST
-# ============================================================================
-
-if __name__ == "__main__":
-
-    memory = MemoryGrid()
-
-    document_id = (
-        memory.add_document(
-            text=(
-                "CoMpaNeoN is a multilingual "
-                "organizational AI architecture."
-            ),
-            lang="en",
-            source="development",
-        )
-    )
-
-    print(
-        "CoMpaNeoN MemoryGrid"
-    )
-
-    print(
-        memory.dimensions()
-    )
-
-    print(
-        {
-            "document_id":
-                document_id
-        }
-    )
-
-    print(
-        memory.stats()
-    )
+     
