@@ -24,7 +24,7 @@ RULES = {
     "criminal_and_cyber_theft_support" : False,
     "religious_view" : Islam,
     "political_view" : None,
-    "Name" : CoMpaNeoN AI,
+    "Name" : CoMpaNeoN_AI,
 }
 
 # Patterns that indicate hallucination or placeholder text
