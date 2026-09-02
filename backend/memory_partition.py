@@ -1994,4 +1994,433 @@ class MemoryPartition:
             )
         ]
 
-    # ===================================================
+# ======================================================================
+    # FIND PARTITION
+    # ======================================================================
+
+    def find_partition(
+        self,
+        *,
+        domain: str = DEFAULT_DOMAIN,
+        hierarchy: str = DEFAULT_HIERARCHY,
+        role: str = DEFAULT_ROLE,
+        relevancy: float = (
+            DEFAULT_RELEVANCY
+        ),
+        project_id: str = "",
+        project_context: str = "",
+    ) -> Tuple[
+        str,
+        List[
+            Dict[
+                str,
+                Any,
+            ]
+        ],
+    ]:
+        """
+        Resolve partition identity
+        and retrieve partition.
+        """
+
+        key = (
+            self.build_partition_key(
+
+                domain=
+                    domain,
+
+                hierarchy=
+                    hierarchy,
+
+                role=
+                    role,
+
+                project_id=
+                    project_id,
+
+                project_context=
+                    project_context,
+
+                relevancy=
+                    relevancy,
+
+            )
+        )
+
+        partition_id = (
+            self.partition_id(
+                key
+            )
+        )
+
+        return (
+
+            partition_id,
+
+            self.get_partition(
+                partition_id
+            ),
+
+        )
+
+    # ======================================================================
+    # GRIDCV
+    # ======================================================================
+
+    def validate_partition(
+        self,
+        partition_id: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Validate partition through GridCV
+        without replacing GridCV.
+
+        GridCV remains intact.
+
+        This method only passes partition
+        information into whichever
+        comparison/validation interface
+        the existing GridCV exposes.
+        """
+
+        records = (
+            self.get_partition(
+                partition_id
+            )
+        )
+
+        if (
+            self.grid_cv
+            is None
+        ):
+
+            return {
+
+                "partition_id":
+                    partition_id,
+
+                "validated":
+                    False,
+
+                "reason":
+                    "gridcv_unavailable",
+
+                "record_count":
+                    len(
+                        records
+                    ),
+
+            }
+
+        try:
+
+            if hasattr(
+                self.grid_cv,
+                "validate",
+            ):
+
+                result = (
+                    self.grid_cv.validate(
+                        records
+                    )
+                )
+
+            elif hasattr(
+                self.grid_cv,
+                "compare",
+            ):
+
+                result = (
+                    self.grid_cv.compare(
+                        records
+                    )
+                )
+
+            elif callable(
+                self.grid_cv
+            ):
+
+                result = (
+                    self.grid_cv(
+                        records
+                    )
+                )
+
+            else:
+
+                result = (
+                    None
+                )
+
+            return {
+
+                "partition_id":
+                    partition_id,
+
+                "validated":
+                    result
+                    is not None,
+
+                "result":
+                    result,
+
+                "record_count":
+                    len(
+                        records
+                    ),
+
+            }
+
+        except Exception as exc:
+
+            return {
+
+                "partition_id":
+                    partition_id,
+
+                "validated":
+                    False,
+
+                "error":
+                    str(
+                        exc
+                    ),
+
+                "record_count":
+                    len(
+                        records
+                    ),
+
+            }
+
+    # ======================================================================
+    # CRAWLER PARTITION ROUTING
+    # ======================================================================
+
+    def partition_crawler_candidates(
+        self,
+        candidates: List[
+            Dict[
+                str,
+                Any,
+            ]
+        ],
+        **context: Any,
+    ) -> List[
+        Dict[
+            str,
+            Any,
+        ]
+    ]:
+        """
+        Receive candidates already routed
+        by GridCrawler/CrawlerRetrieval.
+
+        The partition layer does not
+        recalculate crawler traversal.
+
+        Crawlers remain routers.
+        """
+
+        return self.partition_many(
+            candidates,
+            **context,
+        )
+
+    # ======================================================================
+    # MEMORYGRID ROUTING
+    # ======================================================================
+
+    def partition_document(
+        self,
+        doc_id: Any,
+        **context: Any,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Partition a document already
+        owned by MemoryGrid.
+
+        The document itself remains
+        in MemoryGrid.
+        """
+
+        record = {
+
+            "doc_id":
+                doc_id,
+
+            "source":
+                "memory_grid",
+
+        }
+
+        return self.partition(
+            record,
+            **context,
+        )
+
+    # ======================================================================
+    # PARTITION SUMMARY
+    # ======================================================================
+
+    def summary(
+        self,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Return memory partition status.
+        """
+
+        return {
+
+            "rows":
+                self.rows,
+
+            "cols":
+                self.cols,
+
+            "partition_count":
+                len(
+                    self.partitions
+                ),
+
+            "partition_records":
+                sum(
+
+                    len(
+                        records
+                    )
+
+                    for records
+                    in self.partitions.values()
+
+                ),
+
+            "projects":
+                len(
+                    self.project_states
+                ),
+
+            "project_traces":
+                len(
+                    self.project_traces
+                ),
+
+            "project_pin_sets":
+                len(
+                    self.project_pins
+                ),
+
+            "project_iterations":
+                sum(
+
+                    len(
+                        iterations
+                    )
+
+                    for iterations
+                    in (
+                        self.project_iterations
+                        .values()
+                    )
+
+                ),
+
+            "grid_cv":
+                self.grid_cv
+                is not None,
+
+            "grid_crawler":
+                self.grid_crawler
+                is not None,
+
+            "crawler_retrieval":
+                self.crawler_retrieval
+                is not None,
+
+        }
+
+
+# ============================================================================
+# FUNCTIONAL API
+# ============================================================================
+
+def create_memory_partition(
+    memory_grid: MemoryGrid,
+    grid_cv: Optional[
+        Any
+    ] = None,
+    grid_crawler: Optional[
+        Any
+    ] = None,
+    crawler_retrieval: Optional[
+        Any
+    ] = None,
+) -> MemoryPartition:
+    """
+    Create canonical MemoryPartition.
+    """
+
+    return MemoryPartition(
+
+        memory_grid=
+            memory_grid,
+
+        grid_cv=
+            grid_cv,
+
+        grid_crawler=
+            grid_crawler,
+
+        crawler_retrieval=
+            crawler_retrieval,
+
+    )
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "CoMpaNeoN Memory Partition"
+    )
+
+    print(
+        {
+
+            "default_rows":
+                DEFAULT_ROWS,
+
+            "default_cols":
+                DEFAULT_COLS,
+
+            "architecture":
+                [
+
+                    "MemoryGrid",
+
+                    "MemoryPartition",
+
+                    "GSP XOR Quorum",
+
+                    "GridCV",
+
+                    "GridCrawler",
+
+                    "CrawlerRetrieval",
+
+                ],
+
+        }
+    )
