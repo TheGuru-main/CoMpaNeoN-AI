@@ -977,4 +977,1021 @@ class MemoryPartition:
             "timestamp":
                 utc_now(),
 
-            "eve
+            "event":
+                dict(
+                    event
+                ),
+
+        })
+
+        trace.updated_at = (
+            utc_now()
+        )
+
+        return trace
+
+    # ======================================================================
+    # PROJECT PIN
+    # ======================================================================
+
+    def pin_project(
+        self,
+        project_id: str,
+        value: Any,
+        pin_id: Optional[
+            str
+        ] = None,
+        metadata: Optional[
+            Dict[
+                str,
+                Any,
+            ]
+        ] = None,
+    ) -> ProjectPin:
+        """
+        Pin persistent contextual memory
+        to a project.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        if pin_id is None:
+
+            pin_id = stable_hash(
+                {
+                    "project":
+                        project_id,
+
+                    "value":
+                        value,
+                }
+            )
+
+        pin = ProjectPin(
+
+            project_id=
+                project_id,
+
+            pin_id=
+                pin_id,
+
+            value=
+                value,
+
+            metadata=
+                metadata
+                or {},
+
+        )
+
+        if project_id not in (
+            self.project_pins
+        ):
+
+            self.project_pins[
+                project_id
+            ] = {}
+
+        self.project_pins[
+            project_id
+        ][
+            pin_id
+        ] = pin
+
+        self.trace_project(
+            project_id,
+            {
+
+                "type":
+                    "pin",
+
+                "pin_id":
+                    pin_id,
+
+            },
+        )
+
+        return pin
+
+    # ======================================================================
+    # GET PROJECT PINS
+    # ======================================================================
+
+    def get_project_pins(
+        self,
+        project_id: str,
+    ) -> List[
+        ProjectPin
+    ]:
+        """
+        Return project pins.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        return list(
+            self.project_pins
+            .get(
+                project_id,
+                {},
+            )
+            .values()
+        )
+
+    # ======================================================================
+    # PROJECT ITERATION
+    # ======================================================================
+
+    def iterate_project(
+        self,
+        project_id: str,
+        state: str,
+        metadata: Optional[
+            Dict[
+                str,
+                Any,
+            ]
+        ] = None,
+    ) -> ProjectIteration:
+        """
+        Register a project iteration.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        iterations = (
+            self.project_iterations
+            .setdefault(
+                project_id,
+                [],
+            )
+        )
+
+        iteration = ProjectIteration(
+
+            project_id=
+                project_id,
+
+            iteration=
+                len(
+                    iterations
+                )
+                + 1,
+
+            state=
+                normalize_text(
+                    state
+                ),
+
+            metadata=
+                metadata
+                or {},
+
+        )
+
+        iterations.append(
+            iteration
+        )
+
+        self.trace_project(
+            project_id,
+            {
+
+                "type":
+                    "iteration",
+
+                "iteration":
+                    iteration.iteration,
+
+                "state":
+                    iteration.state,
+
+            },
+        )
+
+        return iteration
+
+    # ======================================================================
+    # PROJECT STATE
+    # ======================================================================
+
+    def set_project_state(
+        self,
+        project_id: str,
+        state: Dict[
+            str,
+            Any,
+        ],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Set project state.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        stored = dict(
+            state
+        )
+
+        stored[
+            "updated_at"
+        ] = utc_now()
+
+        self.project_states[
+            project_id
+        ] = stored
+
+        self.trace_project(
+            project_id,
+            {
+
+                "type":
+                    "state",
+
+                "state":
+                    stored,
+
+            },
+        )
+
+        return stored
+
+    # ======================================================================
+    # GET PROJECT STATE
+    # ======================================================================
+
+    def get_project_state(
+        self,
+        project_id: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Retrieve project state.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        return dict(
+            self.project_states
+            .get(
+                project_id,
+                {},
+            )
+        )
+
+    # ======================================================================
+    # LIST STATE
+    # ======================================================================
+
+    def list_state(
+        self,
+        project_id: str,
+        key: str,
+    ) -> List[
+        Any
+    ]:
+        """
+        Return list state from project.
+        """
+
+        state = (
+            self.get_project_state(
+                project_id
+            )
+        )
+
+        value = state.get(
+            key,
+            [],
+        )
+
+        if isinstance(
+            value,
+            list,
+        ):
+
+            return list(
+                value
+            )
+
+        return []
+
+    # ======================================================================
+    # ANY STATE
+    # ======================================================================
+
+    def any_state(
+        self,
+        project_id: str,
+        key: str,
+    ) -> bool:
+        """
+        Determine whether a project state
+        contains any active value.
+        """
+
+        state = (
+            self.get_project_state(
+                project_id
+            )
+        )
+
+        value = state.get(
+            key
+        )
+
+        if isinstance(
+            value,
+            (
+                list,
+                tuple,
+                set,
+                dict,
+            ),
+        ):
+
+            return any(
+                value
+            )
+
+        return bool(
+            value
+        )
+
+    # ======================================================================
+    # WHILE LOOP STATE
+    # ======================================================================
+
+    def while_state(
+        self,
+        project_id: str,
+        key: str,
+        limit: int = 1000,
+    ) -> List[
+        Any
+    ]:
+        """
+        Iterate deterministic state until
+        the stored sequence is exhausted.
+
+        This is an inspection mechanism,
+        not an infinite execution loop.
+        """
+
+        values = (
+            self.list_state(
+                project_id,
+                key,
+            )
+        )
+
+        result = []
+
+        index = 0
+
+        while (
+            index < len(
+                values
+            )
+            and index < int(
+                limit
+            )
+        ):
+
+            result.append(
+                values[
+                    index
+                ]
+            )
+
+            index += 1
+
+        return result
+
+    # ======================================================================
+    # COMPARE STATE
+    # ======================================================================
+
+    def compare_state(
+        self,
+        left_project_id: str,
+        right_project_id: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Compare two project states.
+        """
+
+        left = (
+            self.get_project_state(
+                left_project_id
+            )
+        )
+
+        right = (
+            self.get_project_state(
+                right_project_id
+            )
+        )
+
+        left_keys = set(
+            left.keys()
+        )
+
+        right_keys = set(
+            right.keys()
+        )
+
+        shared_keys = (
+            left_keys
+            &
+            right_keys
+        )
+
+        differences = {}
+
+        for key in (
+            left_keys
+            |
+            right_keys
+        ):
+
+            left_value = (
+                left.get(
+                    key
+                )
+            )
+
+            right_value = (
+                right.get(
+                    key
+                )
+            )
+
+            if (
+                left_value
+                !=
+                right_value
+            ):
+
+                differences[
+                    key
+                ] = {
+
+                    "left":
+                        left_value,
+
+                    "right":
+                        right_value,
+
+                }
+
+        return {
+
+            "left_project":
+                normalize_text(
+                    left_project_id
+                ),
+
+            "right_project":
+                normalize_text(
+                    right_project_id
+                ),
+
+            "shared_keys":
+                sorted(
+                    shared_keys
+                ),
+
+            "left_only":
+                sorted(
+                    left_keys
+                    -
+                    right_keys
+                ),
+
+            "right_only":
+                sorted(
+                    right_keys
+                    -
+                    left_keys
+                ),
+
+            "differences":
+                differences,
+
+            "equal":
+                not bool(
+                    differences
+                ),
+
+        }
+
+    # ======================================================================
+    # CROSS PROJECT COMPARE
+    # ======================================================================
+
+    def cross_project_compare(
+        self,
+        project_ids: List[
+            str
+        ],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Compare multiple projects.
+        """
+
+        normalized = [
+
+            normalize_text(
+                project_id
+            )
+
+            for project_id
+            in project_ids
+
+            if normalize_text(
+                project_id
+            )
+
+        ]
+
+        states = {
+
+            project_id:
+                self.get_project_state(
+                    project_id
+                )
+
+            for project_id
+            in normalized
+
+        }
+
+        all_keys: Set[
+            str
+        ] = set()
+
+        for state in (
+            states.values()
+        ):
+
+            all_keys.update(
+                state.keys()
+            )
+
+        comparison = {}
+
+        for key in all_keys:
+
+            values = {
+
+                project_id:
+                    state.get(
+                        key
+                    )
+
+                for (
+                    project_id,
+                    state,
+                )
+                in states.items()
+
+            }
+
+            unique_values = {
+
+                stable_hash(
+                    value
+                )
+
+                for value
+                in values.values()
+
+            }
+
+            comparison[
+                key
+            ] = {
+
+                "values":
+                    values,
+
+                "equal":
+                    len(
+                        unique_values
+                    )
+                    <= 1,
+
+            }
+
+        return {
+
+            "projects":
+                normalized,
+
+            "states":
+                states,
+
+            "comparison":
+                comparison,
+
+        }
+
+    # ======================================================================
+    # PROJECT CONTEXT
+    # ======================================================================
+
+    def project_context_aware(
+        self,
+        project_id: str,
+        context: Optional[
+            str
+        ] = None,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Build project-aware context.
+
+        Combines:
+
+            state
+            pins
+            trace
+            latest iteration
+            contextual identity
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        trace = (
+            self.project_traces.get(
+                project_id
+            )
+        )
+
+        iterations = (
+            self.project_iterations.get(
+                project_id,
+                [],
+            )
+        )
+
+        latest_iteration = (
+
+            iterations[-1]
+
+            if iterations
+
+            else None
+
+        )
+
+        return {
+
+            "project_id":
+                project_id,
+
+            "project_context":
+                normalize_text(
+                    context
+                ),
+
+            "state":
+                self.get_project_state(
+                    project_id
+                ),
+
+            "pins":
+                [
+
+                    {
+
+                        "pin_id":
+                            pin.pin_id,
+
+                        "value":
+                            pin.value,
+
+                        "metadata":
+                            pin.metadata,
+
+                    }
+
+                    for pin
+                    in self.get_project_pins(
+                        project_id
+                    )
+
+                ],
+
+            "trace":
+                (
+
+                    trace.events
+
+                    if trace
+
+                    else []
+
+                ),
+
+            "latest_iteration":
+                (
+
+                    {
+
+                        "iteration":
+                            latest_iteration.iteration,
+
+                        "state":
+                            latest_iteration.state,
+
+                        "metadata":
+                            latest_iteration.metadata,
+
+                    }
+
+                    if latest_iteration
+
+                    else None
+
+                ),
+
+        }
+
+    # ======================================================================
+    # PARTITION MEMORY
+    # ======================================================================
+
+    def partition(
+        self,
+        record: Dict[
+            str,
+            Any,
+        ],
+        *,
+        domain: str = DEFAULT_DOMAIN,
+        hierarchy: str = DEFAULT_HIERARCHY,
+        role: str = DEFAULT_ROLE,
+        relevancy: float = (
+            DEFAULT_RELEVANCY
+        ),
+        project_id: str = "",
+        project_context: str = "",
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Partition a MemoryGrid record.
+
+        MemoryGrid remains owner of the
+        original indexed record.
+
+        MemoryPartition stores contextual
+        partition references.
+        """
+
+        key = (
+            self.build_partition_key(
+
+                domain=
+                    domain,
+
+                hierarchy=
+                    hierarchy,
+
+                role=
+                    role,
+
+                project_id=
+                    project_id,
+
+                project_context=
+                    project_context,
+
+                relevancy=
+                    relevancy,
+
+            )
+        )
+
+        partition_id = (
+            self.partition_id(
+                key
+            )
+        )
+
+        shard = (
+            self.gsp_xor_quorum(
+
+                domain=
+                    key.domain,
+
+                hierarchy=
+                    key.hierarchy,
+
+                role=
+                    key.role,
+
+                relevancy_bucket=
+                    key.relevancy_bucket,
+
+                project_id=
+                    key.project_id,
+
+                project_context=
+                    key.project_context,
+
+            )
+        )
+
+        partition_record = {
+
+            "record":
+                dict(
+                    record
+                ),
+
+            "partition_id":
+                partition_id,
+
+            "partition_key":
+                {
+
+                    "domain":
+                        key.domain,
+
+                    "hierarchy":
+                        key.hierarchy,
+
+                    "role":
+                        key.role,
+
+                    "project_id":
+                        key.project_id,
+
+                    "project_context":
+                        key.project_context,
+
+                    "relevancy_bucket":
+                        key.relevancy_bucket,
+
+                },
+
+            "shard":
+                shard,
+
+            "partitioned_at":
+                utc_now(),
+
+        }
+
+        self.partitions.setdefault(
+            partition_id,
+            [],
+        ).append(
+            partition_record
+        )
+
+        self.partition_metadata[
+            partition_id
+        ] = {
+
+            "partition_key":
+                partition_record[
+                    "partition_key"
+                ],
+
+            "shard":
+                shard,
+
+        }
+
+        if project_id:
+
+            self.trace_project(
+                project_id,
+                {
+
+                    "type":
+                        "partition",
+
+                    "partition_id":
+                        partition_id,
+
+                    "shard":
+                        shard,
+
+                },
+            )
+
+        return partition_record
+
+    # ======================================================================
+    # PARTITION MANY
+    # ======================================================================
+
+    def partition_many(
+        self,
+        records: Iterable[
+            Dict[
+                str,
+                Any,
+            ]
+        ],
+        **context: Any,
+    ) -> List[
+        Dict[
+            str,
+            Any,
+        ]
+    ]:
+        """
+        Partition multiple records.
+        """
+
+        results = []
+
+        for record in records:
+
+            results.append(
+                self.partition(
+                    record,
+                    **context,
+                )
+            )
+
+        return results
+
+    # ======================================================================
+    # RETRIEVE PARTITION
+    # ======================================================================
+
+    def get_partition(
+        self,
+        partition_id: str,
+        limit: int = (
+            DEFAULT_PARTITION_LIMIT
+        ),
+    ) -> List[
+        Dict[
+            str,
+            Any,
+        ]
+    ]:
+        """
+        Retrieve partition records.
+        """
+
+        records = (
+            self.partitions.get(
+                partition_id,
+                [],
+            )
+        )
+
+        return records[
+            :int(
+                limit
+            )
+        ]
+
+    # ===================================================
