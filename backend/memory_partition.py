@@ -2,114 +2,111 @@
 CoMpaNeoN Memory Partition
 ==========================
 
-Memory partition layer for CoMpaNeoN.
+Memory partitioning and contextual memory routing layer.
 
 ARCHITECTURE
 ------------
 
-    tokenizer.py
-         │
-         ▼
-    MemoryGrid
-         │
-         ├── GridCrawler
-         │
-         ├── CrawlerRetrieval
-         │
-         ▼
-    MemoryPartition
-         │
-         ├── GSP partition identity
-         ├── XOR partition routing
-         ├── Quorum validation
-         ├── Domain partitioning
-         ├── Hierarchy partitioning
-         ├── Role partitioning
-         ├── Relevancy partitioning
-         ├── Project trace
-         ├── Project pin
-         ├── Project iteration
-         ├── Compare state
-         ├── List state
-         ├── Any state
-         ├── While-loop state
-         ├── Cross-project comparison
-         └── Project-context-aware retrieval
+                        MemoryGrid
+                            │
+                            ▼
+                    MemoryPartition
+                            │
+             ┌──────────────┼──────────────┐
+             │              │              │
+          Domain         Project        Context
+             │              │              │
+             ▼              ▼              ▼
+         Hierarchy       Trace/Pins     Relevancy
+             │              │              │
+             └──────────────┼──────────────┘
+                            │
+                            ▼
+                      GSP XOR Quorum
+                            │
+                            ▼
+                       GridCV intact
+                            │
+                            ▼
+                    Partition Retrieval
+                            │
+                            ▼
+                 Higher Brain Constituents
 
-         │
-         ▼
 
-    Linguistic / Semantic Layer
+RESPONSIBILITIES
+----------------
 
-IMPORTANT
----------
+MemoryPartition owns:
+
+    - partition construction
+    - deterministic partition identity
+    - GSP XOR quorum sharding
+    - domain partitioning
+    - hierarchy partitioning
+    - role partitioning
+    - relevancy partitioning
+    - project traces
+    - project pins
+    - project iteration
+    - project state inspection
+    - list state
+    - any state
+    - while-loop state
+    - state comparison
+    - cross-project comparison
+    - project-context awareness
+    - partition retrieval
+    - GridCV validation/comparison
 
 MemoryPartition does NOT own:
 
     - tokenization
-    - language alphabet mathematics
-    - 46-column linguistic placement
-    - MemoryGrid document placement
-    - canonical GSP start-row calculation
-    - crawler K/D traversal mathematics
-    - Elastic Cloud mathematics
-    - final AI response generation
+    - language mathematics
+    - alphabet mathematics
+    - word placement
+    - GSP linguistic placement
+    - crawler traversal
+    - external acquisition
+    - ranking
+    - prompt generation
+    - rules
+    - tool execution
+    - AI response generation
 
-Those remain owned by their canonical layers.
+AUTHORITIES
+-----------
 
-MemoryPartition owns MEMORY CONTEXT PARTITIONING.
+tokenizer.py
+    Linguistic authority.
 
-The partition layer determines how already-indexed memory is grouped,
-traced, routed, validated, compared and supplied to higher layers.
+keyboard.py / placement.py
+    Canonical GSP placement authority.
 
-GRID
-----
+MemoryGrid
+    Canonical storage/indexing authority.
 
-MemoryGrid remains:
+GridCrawler
+    Grid traversal/router authority.
 
-    46 columns
-    64 rows
+WebCrawler
+    External knowledge acquisition authority.
 
-GridCrawler remains the router through the memory grid.
+GridCV
+    Grid comparison/validation authority.
 
-CrawlerRetrieval remains responsible for retrieval orchestration and
-ranking.
-
-MemoryPartition sits above those layers and creates structured memory
-contexts.
-
-GSP + XOR + QUORUM
-------------------
-
-GSP:
-    deterministic memory routing identity.
-
-XOR:
-    creates a deterministic partition signature from multiple context
-    dimensions.
-
-QUORUM:
-    validates that enough contextual dimensions agree before a partition
-    is considered a strong contextual match.
-
-GridCV:
-    partition/context validation representation.
-
+MemoryPartition
+    Memory partitioning and contextual sharding authority.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 
-from dataclasses import (
-    dataclass,
-    field,
-)
+from dataclasses import dataclass, field
 
-from datetime import (
-    datetime,
-    timezone,
-)
+from datetime import datetime, timezone
 
 from typing import (
     Any,
@@ -123,49 +120,81 @@ from typing import (
 
 
 # ============================================================================
-# OPTIONAL ARCHITECTURE IMPORTS
+# GRIDCV
 # ============================================================================
 
 try:
+    from grid_cv import GridCV
 
+except ImportError:
+
+    GridCV = None
+
+
+# ============================================================================
+# MEMORYGRID
+# ============================================================================
+
+try:
+    from memory_grid import MemoryGrid
+
+except ImportError:
+
+    MemoryGrid = Any
+
+
+# ============================================================================
+# GRID CRAWLER
+# ============================================================================
+
+try:
     from grid_crawler import GridCrawler
 
 except ImportError:
 
-    GridCrawler = None  # type: ignore
+    GridCrawler = None
 
+
+# ============================================================================
+# CRAWLER RETRIEVAL
+# ============================================================================
 
 try:
-
     from crawler_retrieval import CrawlerRetrieval
 
 except ImportError:
 
-    CrawlerRetrieval = None  # type: ignore
+    CrawlerRetrieval = None
 
 
 # ============================================================================
-# PARTITION CONSTANTS
+# CONSTANTS
 # ============================================================================
+
+DEFAULT_ROWS = 64
+
+DEFAULT_COLS = 46
+
+DEFAULT_RELEVANCY = 0.0
+
+DEFAULT_ROLE = "general"
+
+DEFAULT_DOMAIN = "general"
+
+DEFAULT_HIERARCHY = "root"
+
+DEFAULT_PROJECT_STATE = "active"
 
 DEFAULT_PARTITION_LIMIT = 250
-
-DEFAULT_QUORUM = 2
-
-MAX_ITERATION_DEPTH = 64
-
-PROJECT_TRACE_LIMIT = 512
-
-GRIDCV_VECTOR_SIZE = 64
 
 
 # ============================================================================
 # TIME
 # ============================================================================
 
-def _timestamp() -> str:
+def utc_now() -> str:
     """
-    UTC timestamp used for partition tracing.
+    Return current UTC timestamp.
     """
 
     return datetime.now(
@@ -174,48 +203,14 @@ def _timestamp() -> str:
 
 
 # ============================================================================
-# STABLE HASH
-# ============================================================================
-
-def _stable_hash(
-    value: Any,
-) -> int:
-    """
-    Deterministic integer hash.
-
-    Python's built-in hash is intentionally not used because it may vary
-    between processes.
-
-    Memory partition routing must remain deterministic.
-    """
-
-    encoded = (
-        str(value)
-        .encode(
-            "utf-8"
-        )
-    )
-
-    digest = hashlib.sha256(
-        encoded
-    ).digest()
-
-    return int.from_bytes(
-        digest[:8],
-        byteorder="big",
-        signed=False,
-    )
-
-
-# ============================================================================
 # NORMALIZATION
 # ============================================================================
 
-def _normalise_key(
+def normalize_text(
     value: Any,
 ) -> str:
     """
-    Normalize partition labels.
+    Normalize arbitrary values into deterministic strings.
     """
 
     if value is None:
@@ -229,77 +224,85 @@ def _normalise_key(
 
 
 # ============================================================================
-# LIST NORMALIZATION
+# STABLE HASH
 # ============================================================================
 
-def _as_list(
+def stable_hash(
     value: Any,
-) -> List[Any]:
+) -> str:
     """
-    Convert a value into a list without treating strings as iterables.
+    Create deterministic SHA-256 identity.
     """
 
-    if value is None:
-        return []
-
     if isinstance(
         value,
-        list,
+        (
+            dict,
+            list,
+            tuple,
+            set,
+        ),
     ):
-        return value
 
-    if isinstance(
-        value,
-        tuple,
-    ):
-        return list(
-            value
+        try:
+
+            value = json.dumps(
+                value,
+                sort_keys=True,
+                default=str,
+            )
+
+        except Exception:
+
+            value = str(
+                value
+            )
+
+    return hashlib.sha256(
+        str(value)
+        .encode(
+            "utf-8"
         )
+    ).hexdigest()
 
-    if isinstance(
-        value,
-        set,
-    ):
-        return list(
-            value
-        )
 
-    return [
+# ============================================================================
+# INTEGER HASH
+# ============================================================================
+
+def stable_int(
+    value: Any,
+) -> int:
+    """
+    Deterministic integer representation.
+    """
+
+    digest = stable_hash(
         value
-    ]
+    )
+
+    return int(
+        digest[:16],
+        16,
+    )
 
 
 # ============================================================================
-# UNIQUE PRESERVING ORDER
+# XOR
 # ============================================================================
 
-def _unique(
-    values: Iterable[Any],
-) -> List[Any]:
+def xor_values(
+    *values: int,
+) -> int:
     """
-    Remove duplicates while preserving order.
+    XOR arbitrary integer values.
     """
 
-    result = []
-
-    seen: Set[
-        str
-    ] = set()
+    result = 0
 
     for value in values:
 
-        key = repr(
-            value
-        )
-
-        if key in seen:
-            continue
-
-        seen.add(
-            key
-        )
-
-        result.append(
+        result ^= int(
             value
         )
 
@@ -307,247 +310,73 @@ def _unique(
 
 
 # ============================================================================
-# GRIDCV
+# QUORUM
+# ============================================================================
+
+def quorum_value(
+    values: Iterable[int],
+) -> int:
+    """
+    Deterministic quorum value.
+
+    The quorum is formed from the XOR of
+    all participating values.
+    """
+
+    result = 0
+
+    for value in values:
+
+        result ^= int(
+            value
+        )
+
+    return result
+
+
+# ============================================================================
+# DATACLASSES
 # ============================================================================
 
 @dataclass
-class GridCV:
+class PartitionKey:
     """
-    Grid Context Vector.
-
-    GridCV remains a context-validation layer.
-
-    It does NOT replace:
-
-        - GridCrawler
-        - MemoryGrid
-        - GSP
-        - crawler traversal
-
-    GridCV represents partition dimensions as a deterministic context
-    vector which can be compared with another partition.
+    Canonical partition identity.
     """
 
-    domain: str = ""
+    domain: str = DEFAULT_DOMAIN
 
-    hierarchy: str = ""
+    hierarchy: str = DEFAULT_HIERARCHY
 
-    role: str = ""
-
-    relevancy: str = ""
+    role: str = DEFAULT_ROLE
 
     project_id: str = ""
 
-    project_trace: List[
-        str
-    ] = field(
-        default_factory=list
-    )
+    project_context: str = ""
 
-    values: Dict[
-        str,
-        Any
-    ] = field(
-        default_factory=dict
-    )
+    relevancy_bucket: int = 0
 
-    # ------------------------------------------------------------------------
-
-    def vector(
-        self,
-        size: int = GRIDCV_VECTOR_SIZE,
-    ) -> List[int]:
-        """
-        Build a deterministic GridCV vector.
-
-        The vector is derived from contextual dimensions, not from
-        linguistic alphabet placement.
-        """
-
-        size = max(
-            1,
-            int(size),
-        )
-
-        vector = [
-            0
-        ] * size
-
-        components = {
-
-            "domain":
-                self.domain,
-
-            "hierarchy":
-                self.hierarchy,
-
-            "role":
-                self.role,
-
-            "relevancy":
-                self.relevancy,
-
-            "project_id":
-                self.project_id,
-
-        }
-
-        for key, value in components.items():
-
-            if not value:
-                continue
-
-            hashed = _stable_hash(
-                f"{key}:{value}"
-            )
-
-            index = (
-                hashed
-                % size
-            )
-
-            vector[
-                index
-            ] += 1
-
-        for trace in self.project_trace:
-
-            hashed = _stable_hash(
-                f"trace:{trace}"
-            )
-
-            index = (
-                hashed
-                % size
-            )
-
-            vector[
-                index
-            ] += 1
-
-        for key, value in sorted(
-            self.values.items()
-        ):
-
-            hashed = _stable_hash(
-                f"{key}:{value}"
-            )
-
-            index = (
-                hashed
-                % size
-            )
-
-            vector[
-                index
-            ] += 1
-
-        return vector
-
-    # ------------------------------------------------------------------------
-
-    def similarity(
-        self,
-        other: "GridCV",
-    ) -> float:
-        """
-        Compare two GridCV vectors using intersection-over-union style
-        vector agreement.
-
-        Returns:
-
-            0.0 -> no agreement
-            1.0 -> complete agreement
-        """
-
-        left = self.vector()
-
-        right = other.vector()
-
-        intersection = 0
-
-        union = 0
-
-        for a, b in zip(
-            left,
-            right,
-        ):
-
-            intersection += min(
-                a,
-                b,
-            )
-
-            union += max(
-                a,
-                b,
-            )
-
-        if union == 0:
-            return 0.0
-
-        return (
-            intersection
-            / union
-        )
-
-    # ------------------------------------------------------------------------
-
-    def to_dict(
-        self,
-    ) -> Dict[
-        str,
-        Any
-    ]:
-
-        return {
-
-            "domain":
-                self.domain,
-
-            "hierarchy":
-                self.hierarchy,
-
-            "role":
-                self.role,
-
-            "relevancy":
-                self.relevancy,
-
-            "project_id":
-                self.project_id,
-
-            "project_trace":
-                list(
-                    self.project_trace
-                ),
-
-            "values":
-                dict(
-                    self.values
-                ),
-
-        }
-
-
-# ============================================================================
-# PROJECT TRACE
-# ============================================================================
 
 @dataclass
 class ProjectTrace:
     """
-    Tracks memory movement through project contexts.
+    Persistent project trace.
 
-    ProjectTrace preserves:
-
-        where the memory originated,
-        which project contexts consumed it,
-        how it moved,
-        and which partition states were involved.
+    Tracks how knowledge enters and evolves
+    within a project.
     """
 
     project_id: str
+
+    trace_id: str
+
+    created_at: str = field(
+        default_factory=utc_now
+    )
+
+    updated_at: str = field(
+        default_factory=utc_now
+    )
 
     events: List[
         Dict[str, Any]
@@ -555,527 +384,53 @@ class ProjectTrace:
         default_factory=list
     )
 
-    # ------------------------------------------------------------------------
-
-    def add(
-        self,
-        event: str,
-        **data: Any,
-    ) -> Dict[
-        str,
-        Any
-    ]:
-
-        record = {
-
-            "event":
-                _normalise_key(
-                    event
-                ),
-
-            "timestamp":
-                _timestamp(),
-
-            "data":
-                dict(
-                    data
-                ),
-
-        }
-
-        self.events.append(
-            record
-        )
-
-        if len(
-            self.events
-        ) > PROJECT_TRACE_LIMIT:
-
-            self.events = (
-                self.events[
-                    -PROJECT_TRACE_LIMIT:
-                ]
-            )
-
-        return record
-
-    # ------------------------------------------------------------------------
-
-    def names(
-        self,
-    ) -> List[
-        str
-    ]:
-        """
-        Return event names for GridCV context.
-        """
-
-        return [
-
-            event.get(
-                "event",
-                "",
-            )
-
-            for event in self.events
-
-        ]
-
-    # ------------------------------------------------------------------------
-
-    def to_dict(
-        self,
-    ) -> Dict[
-        str,
-        Any
-    ]:
-
-        return {
-
-            "project_id":
-                self.project_id,
-
-            "events":
-                list(
-                    self.events
-                ),
-
-        }
-
-
-# ============================================================================
-# PROJECT PIN
-# ============================================================================
 
 @dataclass
 class ProjectPin:
     """
-    Persistent contextual anchor.
-
-    A pin is not ordinary memory ranking.
-
-    It explicitly tells the partition layer that a memory/project context
-    must remain available during project iteration.
+    Explicit persistent project memory pin.
     """
 
     project_id: str
 
-    key: str
+    pin_id: str
 
     value: Any
 
     created_at: str = field(
-        default_factory=_timestamp
+        default_factory=utc_now
     )
-
-    updated_at: str = field(
-        default_factory=_timestamp
-    )
-
-    active: bool = True
-
-    # ------------------------------------------------------------------------
-
-    def update(
-        self,
-        value: Any,
-    ) -> None:
-
-        self.value = value
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-        self.active = True
-
-    # ------------------------------------------------------------------------
-
-    def to_dict(
-        self,
-    ) -> Dict[
-        str,
-        Any
-    ]:
-
-        return {
-
-            "project_id":
-                self.project_id,
-
-            "key":
-                self.key,
-
-            "value":
-                self.value,
-
-            "created_at":
-                self.created_at,
-
-            "updated_at":
-                self.updated_at,
-
-            "active":
-                self.active,
-
-        }
-
-
-# ============================================================================
-# PARTITION STATE
-# ============================================================================
-
-@dataclass
-class PartitionState:
-    """
-    Stateful project/context representation.
-
-    Explicitly supports the architecture states discussed:
-
-        list
-        any
-        while_loop
-        compare
-        iteration
-    """
-
-    project_id: str
-
-    list_state: List[
-        Any
-    ] = field(
-        default_factory=list
-    )
-
-    any_state: Dict[
-        str,
-        Any
-    ] = field(
-        default_factory=dict
-    )
-
-    while_state: Dict[
-        str,
-        Dict[str, Any]
-    ] = field(
-        default_factory=dict
-    )
-
-    compare_state: Dict[
-        str,
-        Any
-    ] = field(
-        default_factory=dict
-    )
-
-    iteration: int = 0
-
-    updated_at: str = field(
-        default_factory=_timestamp
-    )
-
-    # ------------------------------------------------------------------------
-
-    def add_list(
-        self,
-        value: Any,
-    ) -> None:
-
-        self.list_state.append(
-            value
-        )
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-    # ------------------------------------------------------------------------
-
-    def set_any(
-        self,
-        key: str,
-        value: Any,
-    ) -> None:
-
-        self.any_state[
-            str(key)
-        ] = value
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-    # ------------------------------------------------------------------------
-
-    def set_while(
-        self,
-        key: str,
-        *,
-        active: bool = True,
-        value: Any = None,
-        iterations: int = 0,
-    ) -> None:
-
-        self.while_state[
-            str(key)
-        ] = {
-
-            "active":
-                bool(active),
-
-            "value":
-                value,
-
-            "iterations":
-                int(iterations),
-
-            "updated_at":
-                _timestamp(),
-
-        }
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-    # ------------------------------------------------------------------------
-
-    def increment_iteration(
-        self,
-    ) -> int:
-
-        self.iteration += 1
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-        return self.iteration
-
-    # ------------------------------------------------------------------------
-
-    def to_dict(
-        self,
-    ) -> Dict[
-        str,
-        Any
-    ]:
-
-        return {
-
-            "project_id":
-                self.project_id,
-
-            "list":
-                list(
-                    self.list_state
-                ),
-
-            "any":
-                dict(
-                    self.any_state
-                ),
-
-            "while":
-                dict(
-                    self.while_state
-                ),
-
-            "compare":
-                dict(
-                    self.compare_state
-                ),
-
-            "iteration":
-                self.iteration,
-
-            "updated_at":
-                self.updated_at,
-
-        }
-
-
-# ============================================================================
-# MEMORY PARTITION RECORD
-# ============================================================================
-
-@dataclass
-class MemoryPartitionRecord:
-    """
-    One contextual partition over MemoryGrid candidates.
-    """
-
-    partition_id: str
-
-    xor_signature: int
-
-    gsp_identity: Dict[
-        str,
-        Any
-    ]
-
-    domain: str
-
-    hierarchy: str
-
-    role: str
-
-    relevancy: str
-
-    project_id: str
-
-    document_ids: List[
-        Any
-    ] = field(
-        default_factory=list
-    )
-
-    candidates: List[
-        Dict[str, Any]
-    ] = field(
-        default_factory=list
-    )
-
-    gridcv: Optional[
-        GridCV
-    ] = None
-
-    trace: Optional[
-        ProjectTrace
-    ] = None
-
-    state: Optional[
-        PartitionState
-    ] = None
 
     metadata: Dict[
         str,
-        Any
+        Any,
     ] = field(
         default_factory=dict
     )
 
+
+@dataclass
+class ProjectIteration:
+    """
+    Tracks iterative project development.
+    """
+
+    project_id: str
+
+    iteration: int
+
+    state: str
+
     created_at: str = field(
-        default_factory=_timestamp
+        default_factory=utc_now
     )
 
-    updated_at: str = field(
-        default_factory=_timestamp
-    )
-
-    # ------------------------------------------------------------------------
-
-    def add_candidate(
-        self,
-        candidate: Dict[
-            str,
-            Any
-        ],
-    ) -> None:
-
-        self.candidates.append(
-            dict(
-                candidate
-            )
-        )
-
-        doc_id = candidate.get(
-            "doc_id"
-        )
-
-        if (
-            doc_id is not None
-            and doc_id not in self.document_ids
-        ):
-
-            self.document_ids.append(
-                doc_id
-            )
-
-        self.updated_at = (
-            _timestamp()
-        )
-
-    # ------------------------------------------------------------------------
-
-    def to_dict(
-        self,
-    ) -> Dict[
+    metadata: Dict[
         str,
-        Any
-    ]:
-
-        return {
-
-            "partition_id":
-                self.partition_id,
-
-            "xor_signature":
-                self.xor_signature,
-
-            "gsp_identity":
-                dict(
-                    self.gsp_identity
-                ),
-
-            "domain":
-                self.domain,
-
-            "hierarchy":
-                self.hierarchy,
-
-            "role":
-                self.role,
-
-            "relevancy":
-                self.relevancy,
-
-            "project_id":
-                self.project_id,
-
-            "document_ids":
-                list(
-                    self.document_ids
-                ),
-
-            "candidate_count":
-                len(
-                    self.candidates
-                ),
-
-            "gridcv":
-                (
-                    self.gridcv.to_dict()
-                    if self.gridcv
-                    else None
-                ),
-
-            "trace":
-                (
-                    self.trace.to_dict()
-                    if self.trace
-                    else None
-                ),
-
-            "state":
-                (
-                    self.state.to_dict()
-                    if self.state
-                    else None
-                ),
-
-            "metadata":
-                dict(
-                    self.metadata
-                ),
-
-            "created_at":
-                self.created_at,
-
-            "updated_at":
-                self.updated_at,
-
-        }
+        Any,
+    ] = field(
+        default_factory=dict
+    )
 
 
 # ============================================================================
@@ -1084,6 +439,542 @@ class MemoryPartitionRecord:
 
 class MemoryPartition:
     """
-    CoMpaNeoN contextual memory partition layer.
+    CoMpaNeoN memory partitioning layer.
 
-    The class receives the existing MemoryGrid and crawler architecture.
+    Memory enters through MemoryGrid.
+
+    This layer does not replace MemoryGrid.
+
+    It creates deterministic contextual
+    partitions around already-indexed
+    knowledge and memory.
+    """
+
+    # ======================================================================
+    # INITIALIZATION
+    # ======================================================================
+
+    def __init__(
+        self,
+        memory_grid: MemoryGrid,
+        grid_cv: Optional[
+            Any
+        ] = None,
+        grid_crawler: Optional[
+            Any
+        ] = None,
+        crawler_retrieval: Optional[
+            Any
+        ] = None,
+        rows: int = DEFAULT_ROWS,
+        cols: int = DEFAULT_COLS,
+    ) -> None:
+
+        self.memory = (
+            memory_grid
+        )
+
+        self.rows = int(
+            getattr(
+                memory_grid,
+                "rows",
+                rows,
+            )
+        )
+
+        self.cols = int(
+            getattr(
+                memory_grid,
+                "cols",
+                cols,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # GridCV
+        # --------------------------------------------------------------
+
+        if grid_cv is not None:
+
+            self.grid_cv = (
+                grid_cv
+            )
+
+        elif GridCV is not None:
+
+            try:
+
+                self.grid_cv = (
+                    GridCV()
+                )
+
+            except Exception:
+
+                self.grid_cv = (
+                    None
+                )
+
+        else:
+
+            self.grid_cv = (
+                None
+            )
+
+        # --------------------------------------------------------------
+        # GridCrawler
+        # --------------------------------------------------------------
+
+        if grid_crawler is not None:
+
+            self.grid_crawler = (
+                grid_crawler
+            )
+
+        elif GridCrawler is not None:
+
+            try:
+
+                self.grid_crawler = (
+                    GridCrawler(
+                        memory_grid
+                    )
+                )
+
+            except Exception:
+
+                self.grid_crawler = (
+                    None
+                )
+
+        else:
+
+            self.grid_crawler = (
+                None
+            )
+
+        # --------------------------------------------------------------
+        # Crawler Retrieval
+        # --------------------------------------------------------------
+
+        if crawler_retrieval is not None:
+
+            self.crawler_retrieval = (
+                crawler_retrieval
+            )
+
+        elif CrawlerRetrieval is not None:
+
+            try:
+
+                self.crawler_retrieval = (
+                    CrawlerRetrieval(
+                        memory_grid
+                    )
+                )
+
+            except Exception:
+
+                self.crawler_retrieval = (
+                    None
+                )
+
+        else:
+
+            self.crawler_retrieval = (
+                None
+            )
+
+        # --------------------------------------------------------------
+        # PARTITION STORAGE
+        # --------------------------------------------------------------
+
+        self.partitions: Dict[
+            str,
+            List[
+                Dict[str, Any]
+            ],
+        ] = {}
+
+        self.partition_metadata: Dict[
+            str,
+            Dict[str, Any],
+        ] = {}
+
+        # --------------------------------------------------------------
+        # PROJECTS
+        # --------------------------------------------------------------
+
+        self.project_traces: Dict[
+            str,
+            ProjectTrace,
+        ] = {}
+
+        self.project_pins: Dict[
+            str,
+            Dict[
+                str,
+                ProjectPin,
+            ],
+        ] = {}
+
+        self.project_iterations: Dict[
+            str,
+            List[
+                ProjectIteration
+            ],
+        ] = {}
+
+        self.project_states: Dict[
+            str,
+            Dict[
+                str,
+                Any,
+            ],
+        ] = {}
+
+    # ======================================================================
+    # GRID DIMENSIONS
+    # ======================================================================
+
+    def grid_dimensions(
+        self,
+    ) -> Tuple[
+        int,
+        int,
+    ]:
+        """
+        Return MemoryGrid dimensions.
+
+        Current architecture:
+
+            64 rows
+            46 columns
+
+        The partition layer follows
+        MemoryGrid dimensions rather
+        than creating its own grid.
+        """
+
+        return (
+            self.rows,
+            self.cols,
+        )
+
+    # ======================================================================
+    # RELEVANCY BUCKET
+    # ======================================================================
+
+    def relevancy_bucket(
+        self,
+        relevancy: float,
+        buckets: int = 10,
+    ) -> int:
+        """
+        Convert relevancy into
+        deterministic partition bucket.
+        """
+
+        value = float(
+            relevancy
+        )
+
+        value = max(
+            0.0,
+            min(
+                1.0,
+                value,
+            ),
+        )
+
+        return min(
+            buckets - 1,
+            int(
+                value * buckets
+            ),
+        )
+
+    # ======================================================================
+    # BUILD PARTITION KEY
+    # ======================================================================
+
+    def build_partition_key(
+        self,
+        *,
+        domain: str = DEFAULT_DOMAIN,
+        hierarchy: str = DEFAULT_HIERARCHY,
+        role: str = DEFAULT_ROLE,
+        project_id: str = "",
+        project_context: str = "",
+        relevancy: float = (
+            DEFAULT_RELEVANCY
+        ),
+    ) -> PartitionKey:
+        """
+        Build canonical contextual partition key.
+        """
+
+        return PartitionKey(
+            domain=(
+                normalize_text(
+                    domain
+                )
+                or DEFAULT_DOMAIN
+            ),
+
+            hierarchy=(
+                normalize_text(
+                    hierarchy
+                )
+                or DEFAULT_HIERARCHY
+            ),
+
+            role=(
+                normalize_text(
+                    role
+                )
+                or DEFAULT_ROLE
+            ),
+
+            project_id=(
+                normalize_text(
+                    project_id
+                )
+            ),
+
+            project_context=(
+                normalize_text(
+                    project_context
+                )
+            ),
+
+            relevancy_bucket=(
+                self.relevancy_bucket(
+                    relevancy
+                )
+            ),
+        )
+
+    # ======================================================================
+    # PARTITION ID
+    # ======================================================================
+
+    def partition_id(
+        self,
+        key: PartitionKey,
+    ) -> str:
+        """
+        Deterministic partition identifier.
+        """
+
+        payload = {
+
+            "domain":
+                key.domain,
+
+            "hierarchy":
+                key.hierarchy,
+
+            "role":
+                key.role,
+
+            "project_id":
+                key.project_id,
+
+            "project_context":
+                key.project_context,
+
+            "relevancy_bucket":
+                key.relevancy_bucket,
+
+        }
+
+        return stable_hash(
+            payload
+        )
+
+    # ======================================================================
+    # GSP XOR QUORUM
+    # ======================================================================
+
+    def gsp_xor_quorum(
+        self,
+        *,
+        domain: str,
+        hierarchy: str,
+        role: str,
+        relevancy_bucket: int,
+        project_id: str = "",
+        project_context: str = "",
+    ) -> Dict[
+        str,
+        int,
+    ]:
+        """
+        Produce deterministic shard routing
+        from contextual dimensions.
+
+        This does not replace GSP placement.
+
+        It determines which contextual
+        memory partition/shard should own
+        the record after MemoryGrid has
+        handled canonical storage.
+
+        Quorum dimensions:
+
+            domain
+            hierarchy
+            role
+            relevancy
+            project
+            project context
+
+        The dimensions are XORed into a
+        deterministic quorum value.
+        """
+
+        domain_value = stable_int(
+            domain
+        )
+
+        hierarchy_value = stable_int(
+            hierarchy
+        )
+
+        role_value = stable_int(
+            role
+        )
+
+        relevancy_value = int(
+            relevancy_bucket
+        )
+
+        project_value = stable_int(
+            project_id
+        )
+
+        context_value = stable_int(
+            project_context
+        )
+
+        quorum = quorum_value(
+            [
+                domain_value,
+                hierarchy_value,
+                role_value,
+                relevancy_value,
+                project_value,
+                context_value,
+            ]
+        )
+
+        xor = xor_values(
+            domain_value,
+            hierarchy_value,
+            role_value,
+            relevancy_value,
+            project_value,
+            context_value,
+        )
+
+        rows, cols = (
+            self.grid_dimensions()
+        )
+
+        shard_row = (
+            quorum % rows
+        ) + 1
+
+        shard_col = (
+            xor % cols
+        )
+
+        return {
+
+            "quorum":
+                quorum,
+
+            "xor":
+                xor,
+
+            "row":
+                shard_row,
+
+            "col":
+                shard_col,
+
+        }
+
+    # ======================================================================
+    # PROJECT TRACE
+    # ======================================================================
+
+    def ensure_project_trace(
+        self,
+        project_id: str,
+    ) -> ProjectTrace:
+        """
+        Ensure a project trace exists.
+        """
+
+        project_id = (
+            normalize_text(
+                project_id
+            )
+        )
+
+        if project_id not in (
+            self.project_traces
+        ):
+
+            trace = ProjectTrace(
+
+                project_id=
+                    project_id,
+
+                trace_id=
+                    stable_hash(
+                        {
+                            "project":
+                                project_id
+                        }
+                    ),
+
+            )
+
+            self.project_traces[
+                project_id
+            ] = trace
+
+        return self.project_traces[
+            project_id
+        ]
+
+    # ======================================================================
+    # ADD PROJECT TRACE EVENT
+    # ======================================================================
+
+    def trace_project(
+        self,
+        project_id: str,
+        event: Dict[
+            str,
+            Any,
+        ],
+    ) -> ProjectTrace:
+        """
+        Append deterministic project trace event.
+        """
+
+        trace = (
+            self.ensure_project_trace(
+                project_id
+            )
+        )
+
+        trace.events.append({
+
+            "timestamp":
+                utc_now(),
+
+            "eve
