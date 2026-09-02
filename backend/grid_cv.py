@@ -1822,7 +1822,6 @@ def relationship_between_partitions(
         partition_b,
     )
 
-
 # ============================================================================
 # DEVELOPMENT TEST
 # ============================================================================
@@ -1899,4 +1898,71 @@ if __name__ == "__main__":
                 "CoMpaNeoN"
             ),
             "phase": (
-                "brain_par
+                "brain_partition"
+            ),
+        },
+    }
+
+    partition_b = {
+
+        **partition_a,
+
+        "role": (
+            "retrieval"
+        ),
+
+        "relevancy": 0.82,
+
+        "project_iteration": 5,
+    }
+
+    cv = GridCV()
+
+    print(
+        "Validation:"
+    )
+
+    print(
+        cv.validate_partition(
+            partition_a
+        )
+    )
+
+    print(
+        "\nPartition signature:"
+    )
+
+    print(
+        cv.partition_signature(
+            partition_a
+        )
+    )
+
+    print(
+        "\nPartition comparison:"
+    )
+
+    print(
+        json.dumps(
+            cv.compare_partitions(
+                partition_a,
+                partition_b,
+            ),
+            indent=2,
+        )
+    )
+
+    print(
+        "\nRelationship signal:"
+    )
+
+    print(
+        json.dumps(
+            cv.relationship_between_partitions(
+                partition_a,
+                partition_b,
+            ),
+            indent=2,
+        )
+    )
+            
