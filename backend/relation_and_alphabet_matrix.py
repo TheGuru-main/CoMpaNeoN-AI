@@ -1,44 +1,80 @@
 """
-Alphabet Matrix
-================
+Relation and Alphabet Matrix
+===========================
 
-CoMpaNeoN multilingual alphabet/relationship substrate.
+CoMpaNeoN multilingual alphabet and relationship substrate.
 
-Responsibilities:
+Responsibilities
+----------------
 - Maintain the 25 deterministic relationship classes.
-- Map every alphabet exposed by tokenizer.py.
+- Consume alphabets and language mapping from tokenizer.py.
 - Provide language-aware letter indexing.
 - Provide language-aware alphabet-pair relationships.
 - Provide word relationship signatures.
-- Provide relationship scores for WordChain and WordUnderstanding.
-- Provide deterministic matrix representations suitable for
-  downstream matrix operations / deep-learning infrastructure.
+- Provide alphabet matrix signatures.
+- Provide relationship scores.
+- Call matrix_maths.py for higher mathematical signal analysis.
+- Call grid_cv.py through the established Matrix Maths signal bridge.
+- Produce unified relation/alphabet signals for downstream
+  linguistic, semantic and understanding layers.
 
-Important:
-- tokenizer.py remains the authority for language/token definitions.
-- This module does NOT tokenize text.
-- This module does NOT replace ranking.py.
-- This module does NOT replace memory_grid.py.
-- This module does NOT generate responses.
+Authority
+---------
+tokenizer.py
+    Owns tokenization and language/alphabet mapping.
 
-Architecture:
+matrix_maths.py
+    Owns mathematical signal construction.
 
-    tokenizer.py
-          ↓
-    alphabet_matrix.py
-          ↓
-    ranking.py
-          ↓
-    word_chain.py
-          ↓
-    word_understanding.py
+grid_cv.py
+    Owns grid comparison, validation and partition-compatible vectors.
+
+This module
+    Owns the relationship/alphabet substrate and connects those
+    established signals without replacing their authorities.
+
+This module does NOT:
+    - tokenize text
+    - perform GSP placement
+    - traverse MemoryGrid
+    - index MemoryGrid
+    - replace GridCrawler
+    - replace GridCV
+    - replace ranking
+    - generate prompts
+    - generate AI responses
 """
 
 from __future__ import annotations
-from langdetect import detect, LangDetectException
-from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import string
+
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
+
+from langdetect import (
+    detect,
+    LangDetectException,
+)
+
+
+# ============================================================================
+# OPTIONAL MATRIX MATHS CONNECTION
+# ============================================================================
+
+try:
+
+    import matrix_maths
+
+except Exception:
+
+    matrix_maths = None
 
 
 # ============================================================================
@@ -49,127 +85,127 @@ RELATION_MATRIX: Dict[int, List[str]] = {
 
     1: [
         "AB", "CD", "EF", "GH", "IJ", "KL", "MN",
-        "OP", "QR", "ST", "UV", "WX", "YZ"
+        "OP", "QR", "ST", "UV", "WX", "YZ",
     ],
 
     2: [
         "BC", "DE", "FG", "HI", "JK", "LM", "NO",
-        "PQ", "RS", "TU", "VZ", "WA", "XY"
+        "PQ", "RS", "TU", "VZ", "WA", "XY",
     ],
 
     3: [
         "AZ", "BY", "CN", "DW", "EV", "FU", "GT",
-        "HS", "IR", "JQ", "KP", "LO", "MX"
+        "HS", "IR", "JQ", "KP", "LO", "MX",
     ],
 
     4: [
         "ZB", "YC", "ND", "WE", "VF", "UG", "TH",
-        "SI", "RJ", "QK", "PL", "OM", "XA"
+        "SI", "RJ", "QK", "PL", "OM", "XA",
     ],
 
     5: [
         "AC", "BD", "EH", "FI", "GJ", "KM", "LN",
-        "OQ", "PR", "SU", "TV", "WY", "XZ"
+        "OQ", "PR", "SU", "TV", "WY", "XZ",
     ],
 
     6: [
         "AN", "BO", "CP", "DQ", "ER", "FT", "GS",
-        "HU", "IV", "JW", "KX", "LY", "MZ"
+        "HU", "IV", "JW", "KX", "LY", "MZ",
     ],
 
     7: [
         "PW", "JX", "HM", "DV", "BN", "QT", "FZ",
-        "KS", "OY", "GL", "AU", "EI", "CR"
+        "KS", "OY", "GL", "AU", "EI", "CR",
     ],
 
     8: [
         "VW", "OR", "BP", "MT", "HQ", "DG", "CK",
-        "AY", "IX", "FS", "EN", "JZ", "LU"
+        "AY", "IX", "FS", "EN", "JZ", "LU",
     ],
 
     9: [
         "BT", "IN", "AS", "DZ", "JM", "EK", "CU",
-        "HR", "VY", "OW", "QX", "FL", "GP"
+        "HR", "VY", "OW", "QX", "FL", "GP",
     ],
 
     10: [
         "CS", "NW", "LQ", "FH", "OX", "PZ", "IY",
-        "EU", "BJ", "MR", "GK", "AV", "DT"
+        "EU", "BJ", "MR", "GK", "AV", "DT",
     ],
 
     11: [
         "GN", "BW", "SZ", "AI", "FO", "LX", "DR",
-        "MQ", "CE", "JU", "HY", "KV", "PT"
+        "MQ", "CE", "JU", "HY", "KV", "PT",
     ],
 
     12: [
         "JS", "NY", "FQ", "EX", "WZ", "KO", "BU",
-        "IL", "HV", "CT", "GR", "AM", "DP"
+        "IL", "HV", "CT", "GR", "AM", "DP",
     ],
 
     13: [
         "AH", "PU", "RW", "SX", "EM", "CL", "GI",
-        "QV", "DY", "TZ", "JO", "BK", "FN"
+        "QV", "DY", "TZ", "JO", "BK", "FN",
     ],
 
     14: [
         "HP", "GQ", "BV", "CJ", "LS", "DM", "ET",
-        "FY", "AK", "NX", "OU", "RZ", "IW"
+        "FY", "AK", "NX", "OU", "RZ", "IW",
     ],
 
     15: [
         "NR", "BE", "QW", "OS", "GZ", "LV", "FK",
-        "HJ", "PY", "AT", "IM", "DU", "CX"
+        "HJ", "PY", "AT", "IM", "DU", "CX",
     ],
 
     16: [
         "HL", "KR", "GX", "SY", "IZ", "JN", "DF",
-        "CV", "OT", "EQ", "UW", "AP", "BM"
+        "CV", "OT", "EQ", "UW", "AP", "BM",
     ],
 
     17: [
         "PV", "AO", "RY", "NU", "DL", "CW", "JT",
-        "HX", "BS", "QZ", "FM", "EG", "IK"
+        "HX", "BS", "QZ", "FM", "EG", "IK",
     ],
 
     18: [
         "RX", "QY", "GV", "MU", "DS", "JP", "BF",
-        "AL", "CI", "NZ", "KT", "EO", "HW"
+        "AL", "CI", "NZ", "KT", "EO", "HW",
     ],
 
     19: [
         "IP", "HK", "BQ", "CM", "AD", "GO", "JL",
-        "RT", "VX", "UY", "NS", "EZ", "FW"
+        "RT", "VX", "UY", "NS", "EZ", "FW",
     ],
 
     20: [
         "FP", "JY", "BL", "DH", "IO", "NQ", "RV",
-        "KU", "GW", "MS", "AE", "CZ", "TX"
+        "KU", "GW", "MS", "AE", "CZ", "TX",
     ],
 
     21: [
         "ES", "NP", "AJ", "FR", "UZ", "MV", "HO",
-        "BI", "DX", "KW", "GY", "CQ", "LT"
+        "BI", "DX", "KW", "GY", "CQ", "LT",
     ],
 
     22: [
         "TY", "KZ", "AR", "HN", "QU", "EL", "MP",
-        "BG", "FX", "JV", "DI", "SW", "CO"
+        "BG", "FX", "JV", "DI", "SW", "CO",
     ],
 
     23: [
         "MW", "AG", "LZ", "DO", "RU", "KY", "NV",
-        "FJ", "EP", "BX", "CH", "QS", "IT"
+        "FJ", "EP", "BX", "CH", "QS", "IT",
     ],
 
     24: [
         "IU", "BH", "OZ", "CF", "EY", "TW", "LR",
-        "DJ", "PX", "AQ", "KN", "GM", "SV"
+        "DJ", "PX", "AQ", "KN", "GM", "SV",
     ],
 
     25: [
         "EJ", "NT", "IQ", "AF", "OV", "BR", "HZ",
-        "PS", "UX", "LW", "DK", "CG", "MY"
+        "PS", "UX", "LW", "DK", "CG", "MY",
     ],
 }
 
@@ -180,17 +216,17 @@ RELATION_MATRIX: Dict[int, List[str]] = {
 
 def _load_tokenizer_languages() -> Dict[str, Any]:
     """
-    Discover language/alphabet definitions exposed by tokenizer.py.
+    Discover language and alphabet definitions exposed by tokenizer.py.
 
     tokenizer.py remains the source of truth.
-
-    The bridge intentionally supports several possible exported names so
-    alphabet_matrix.py does not duplicate tokenizer configuration.
     """
 
     try:
+
         import tokenizer
+
     except ImportError:
+
         return {}
 
     candidates = (
@@ -202,48 +238,140 @@ def _load_tokenizer_languages() -> Dict[str, Any]:
     )
 
     for name in candidates:
-        value = getattr(tokenizer, name, None)
 
-        if isinstance(value, dict):
+        value = getattr(
+            tokenizer,
+            name,
+            None,
+        )
+
+        if isinstance(
+            value,
+            dict,
+        ):
             return value
 
     return {}
 
 
-TOKENIZER_LANGUAGES = _load_tokenizer_languages()
+TOKENIZER_LANGUAGES = (
+    _load_tokenizer_languages()
+)
 
 
 # ============================================================================
-# ALPHABET REGISTRY
+# LANGUAGE NORMALIZATION
+# ============================================================================
+
+def normalize_language(
+    lang: Optional[str],
+    fallback: str = "en",
+) -> str:
+
+    value = (
+        str(
+            lang
+            or fallback
+        )
+        .strip()
+        .lower()
+    )
+
+    try:
+
+        import tokenizer
+
+        normalizer = getattr(
+            tokenizer,
+            "normalize_lang",
+            None,
+        )
+
+        if callable(
+            normalizer
+        ):
+
+            return str(
+                normalizer(
+                    value
+                )
+            ).strip().lower()
+
+    except Exception:
+
+        pass
+
+    return value or fallback
+
+
+# ============================================================================
+# LANGUAGE DETECTION
+# ============================================================================
+
+def detect_language(
+    text: str,
+    fallback: str = "en",
+) -> str:
+    """
+    Detect language.
+
+    tokenizer.py normalization is used after detection where available.
+    """
+
+    clean = str(
+        text
+        or ""
+    ).strip()
+
+    if not clean:
+
+        return normalize_language(
+            fallback
+        )
+
+    try:
+
+        detected = detect(
+            clean
+        )
+
+        return normalize_language(
+            detected,
+            fallback=fallback,
+        )
+
+    except LangDetectException:
+
+        return normalize_language(
+            fallback
+        )
+
+    except Exception:
+
+        return normalize_language(
+            fallback
+        )
+
+
+# ============================================================================
+# ALPHABET EXTRACTION
 # ============================================================================
 
 def _extract_alphabet(
     language_config: Any,
 ) -> Optional[str]:
-    """
-    Extract an alphabet from a tokenizer language definition.
 
-    Supported forms:
+    if isinstance(
+        language_config,
+        str,
+    ):
 
-        "abcdefghijklmnopqrstuvwxyz"
-
-    or:
-
-        {
-            "alphabet": "...",
-        }
-
-    or:
-
-        {
-            "letters": "...",
-        }
-    """
-
-    if isinstance(language_config, str):
         return language_config
 
-    if isinstance(language_config, dict):
+    if isinstance(
+        language_config,
+        dict,
+    ):
 
         for key in (
             "alphabet",
@@ -252,157 +380,121 @@ def _extract_alphabet(
             "characters",
         ):
 
-            value = language_config.get(key)
+            value = language_config.get(
+                key
+            )
 
-            if isinstance(value, str):
+            if isinstance(
+                value,
+                str,
+            ):
+
                 return value
 
-            if isinstance(value, (list, tuple)):
+            if isinstance(
+                value,
+                (
+                    list,
+                    tuple,
+                ),
+            ):
+
                 return "".join(
-                    str(x)
-                    for x in value
+                    str(item)
+                    for item in value
                 )
 
     return None
 
 
+# ============================================================================
+# UNIQUE ALPHABET CHARACTERS
+# ============================================================================
+
+def _unique_characters(
+    value: str,
+) -> str:
+
+    seen = set()
+
+    result = []
+
+    for char in str(
+        value
+    ):
+
+        if char in seen:
+            continue
+
+        seen.add(
+            char
+        )
+
+        result.append(
+            char
+        )
+
+    return "".join(
+        result
+    )
+
+
+# ============================================================================
+# LANGUAGE ALPHABET
+# ============================================================================
+
 def get_language_alphabet(
     lang: str,
 ) -> str:
     """
-    Return the tokenizer-defined alphabet for a language.
+    Return the alphabet defined by tokenizer.py.
 
-    English falls back to the standard Latin alphabet when tokenizer.py
-    does not expose a separate alphabet definition.
+    English retains the standard Latin fallback.
     """
 
-    normalized = str(lang).strip().lower()
+    normalized = normalize_language(
+        lang
+    )
 
-    config = TOKENIZER_LANGUAGES.get(normalized)
+    config = (
+        TOKENIZER_LANGUAGES.get(
+            normalized
+        )
+    )
 
-    alphabet = _extract_alphabet(config)
+    alphabet = _extract_alphabet(
+        config
+    )
 
     if alphabet:
-        return _unique_characters(alphabet)
+
+        return _unique_characters(
+            alphabet
+        )
 
     if normalized in {
         "en",
         "eng",
         "english",
     }:
+
         return string.ascii_lowercase
 
     return string.ascii_lowercase
 
 
-def _unique_characters(
-    value: str,
-) -> str:
-    """
-    Preserve alphabet order while removing duplicate characters.
-    """
-
-    seen = set()
-    result = []
-
-    for char in str(value):
-
-        if char in seen:
-            continue
-
-        seen.add(char)
-        result.append(char)
-
-    return "".join(result)
-
+# ============================================================================
+# SUPPORTED LANGUAGES
+# ============================================================================
 
 def supported_languages() -> List[str]:
-    """
-    Return every language currently exposed by tokenizer.py.
-    """
 
     return sorted(
-        str(lang)
+        str(
+            lang
+        )
         for lang in TOKENIZER_LANGUAGES.keys()
     )
-
-
-# ============================================================================
-# LANGUAGE ALPHABET MATRIX
-# ============================================================================
-
-def build_alphabet_matrix(
-    lang: str,
-) -> List[List[int]]:
-    """
-    Build a deterministic alphabet adjacency matrix.
-
-    Matrix[i][j] = 1 when the two alphabet positions participate in
-    any of the 25 relationship classes.
-
-    The matrix is symmetric because alphabet relationships are undirected.
-    """
-
-    alphabet = get_language_alphabet(lang)
-
-    size = len(alphabet)
-
-    matrix = [
-        [0 for _ in range(size)]
-        for _ in range(size)
-    ]
-
-    # ------------------------------------------------------------------
-    # Latin relationship classes can be projected directly.
-    # ------------------------------------------------------------------
-
-    latin = string.ascii_uppercase
-
-    position = {
-        char: index
-        for index, char in enumerate(alphabet.upper())
-    }
-
-    if set(latin).issubset(position):
-
-        for pairs in RELATION_MATRIX.values():
-
-            for pair in pairs:
-
-                a = pair[0]
-                b = pair[1]
-
-                if a not in position:
-                    continue
-
-                if b not in position:
-                    continue
-
-                i = position[a]
-                j = position[b]
-
-                if i == j:
-                    continue
-
-                matrix[i][j] = 1
-                matrix[j][i] = 1
-
-    return matrix
-
-
-# ============================================================================
-# LANGUAGE RELATIONSHIP MATRICES
-# ============================================================================
-
-def build_all_alphabet_matrices() -> Dict[str, List[List[int]]]:
-    """
-    Build the alphabet matrix for every tokenizer-supported language.
-    """
-
-    return {
-        lang: build_alphabet_matrix(lang)
-        for lang in supported_languages()
-    }
 
 
 # ============================================================================
@@ -412,13 +504,19 @@ def build_all_alphabet_matrices() -> Dict[str, List[List[int]]]:
 def normalize_letter(
     letter: str,
 ) -> str:
-    return str(letter).strip().upper()
+
+    return str(
+        letter
+    ).strip().upper()
 
 
 def normalize_pair(
     pair: str,
 ) -> str:
-    return str(pair).strip().upper()
+
+    return str(
+        pair
+    ).strip().upper()
 
 
 # ============================================================================
@@ -429,22 +527,28 @@ def letter_index(
     letter: str,
     lang: str = "en",
 ) -> Optional[int]:
-    """
-    Return deterministic alphabet position for a letter.
 
-    Index is zero-based internally.
-    """
-
-    clean = normalize_letter(letter)
+    clean = normalize_letter(
+        letter
+    )
 
     if not clean:
         return None
 
-    alphabet = get_language_alphabet(lang).upper()
+    alphabet = (
+        get_language_alphabet(
+            lang
+        ).upper()
+    )
 
     try:
-        return alphabet.index(clean)
+
+        return alphabet.index(
+            clean
+        )
+
     except ValueError:
+
         return None
 
 
@@ -456,37 +560,20 @@ def get_relationship_class(
     pair: str,
 ) -> Optional[int]:
 
-    pair = normalize_pair(pair)
+    normalized = normalize_pair(
+        pair
+    )
 
-    for class_id, pairs in RELATION_MATRIX.items():
+    for class_id, pairs in (
+        RELATION_MATRIX.items()
+    ):
 
-        if pair in pairs:
+        if normalized in pairs:
+
             return class_id
 
     return None
 
-
-# ============================================================================
-# RELATIONSHIP CLASS LOOKUP
-# ============================================================================
-
-def detect_language(text: str) -> str:
-    """
-    Detect the language of a text using langdetect.
-
-    Falls back to English for empty, very short, ambiguous,
-    or otherwise undetectable text.
-    """
-
-    if not text or not str(text).strip():
-        return "en"
-
-    try:
-        return detect(str(text))
-    except LangDetectException:
-        return "en"
-    except Exception:
-        return "en"
 
 # ============================================================================
 # LANGUAGE-AWARE RELATIONSHIP LOOKUP
@@ -497,36 +584,32 @@ def get_relationship_class_for_letters(
     letter_b: str,
     lang: str = "en",
 ) -> Optional[int]:
-    """
-    Resolve the relationship class between two letters.
 
-    For the Latin alphabet this uses the existing 25 classes.
-
-    For non-Latin alphabets, the alphabet matrix remains available even
-    when no Latin class mapping exists.
-    """
-
-    a = normalize_letter(letter_a)
-    b = normalize_letter(letter_b)
-
-    if not a or not b:
-        return None
-
-    pair = f"{a}{b}"
-
-    direct = get_relationship_class(pair)
-
-    if direct is not None:
-        return direct
-
-    reverse = get_relationship_class(
-        f"{b}{a}"
+    a = normalize_letter(
+        letter_a
     )
 
-    if reverse is not None:
-        return reverse
+    b = normalize_letter(
+        letter_b
+    )
 
-    return None
+    if not a or not b:
+
+        return None
+
+    direct = (
+        get_relationship_class(
+            f"{a}{b}"
+        )
+    )
+
+    if direct is not None:
+
+        return direct
+
+    return get_relationship_class(
+        f"{b}{a}"
+    )
 
 
 # ============================================================================
@@ -539,10 +622,109 @@ def get_class_pairs(
 
     return list(
         RELATION_MATRIX.get(
-            int(class_id),
+            int(
+                class_id
+            ),
             [],
         )
     )
+
+
+# ============================================================================
+# ALPHABET MATRIX
+# ============================================================================
+
+def build_alphabet_matrix(
+    lang: str,
+) -> List[List[float]]:
+    """
+    Build the local deterministic alphabet relationship matrix.
+
+    Matrix Maths can provide weighted mathematical versions of this
+    substrate while this module retains the canonical relationship view.
+    """
+
+    alphabet = (
+        get_language_alphabet(
+            lang
+        )
+    )
+
+    size = len(
+        alphabet
+    )
+
+    matrix = [
+        [
+            0.0
+            for _ in range(
+                size
+            )
+        ]
+        for _ in range(
+            size
+        )
+    ]
+
+    position = {
+        char: index
+        for index, char in enumerate(
+            alphabet.upper()
+        )
+    }
+
+    latin = (
+        string.ascii_uppercase
+    )
+
+    if set(
+        latin
+    ).issubset(
+        position
+    ):
+
+        for pairs in (
+            RELATION_MATRIX.values()
+        ):
+
+            for pair in pairs:
+
+                a = pair[0]
+                b = pair[1]
+
+                if (
+                    a not in position
+                    or b not in position
+                ):
+                    continue
+
+                i = position[a]
+                j = position[b]
+
+                if i == j:
+                    continue
+
+                matrix[i][j] = 1.0
+                matrix[j][i] = 1.0
+
+    return matrix
+
+
+# ============================================================================
+# ALL LANGUAGE MATRICES
+# ============================================================================
+
+def build_all_alphabet_matrices() -> Dict[
+    str,
+    List[List[float]],
+]:
+
+    return {
+        lang: build_alphabet_matrix(
+            lang
+        )
+        for lang in supported_languages()
+    }
 
 
 # ============================================================================
@@ -552,75 +734,117 @@ def get_class_pairs(
 def get_letter_relationships(
     letter: str,
     lang: str = "en",
-) -> List[Dict[str, object]]:
+) -> List[Dict[str, Any]]:
 
-    letter = normalize_letter(letter)
+    language = normalize_language(
+        lang
+    )
 
-    relationships = []
+    clean = normalize_letter(
+        letter
+    )
 
-    alphabet = get_language_alphabet(lang).upper()
+    relationships: List[
+        Dict[str, Any]
+    ] = []
 
-    # ---------------------------------------------------------------
-    # Existing 25-class relationships.
-    # ---------------------------------------------------------------
-
-    for class_id, pairs in RELATION_MATRIX.items():
+    for class_id, pairs in (
+        RELATION_MATRIX.items()
+    ):
 
         for pair in pairs:
 
-            if letter in pair:
+            if clean not in pair:
+                continue
 
-                other = (
-                    pair[1]
-                    if pair[0] == letter
-                    else pair[0]
-                )
+            other = (
+                pair[1]
+                if pair[0] == clean
+                else pair[0]
+            )
 
-                relationships.append({
+            relationships.append(
+                {
                     "class": class_id,
                     "pair": pair,
-                    "letter": letter,
+                    "letter": clean,
                     "related_letter": other,
-                    "language": lang,
-                })
-
-    # ---------------------------------------------------------------
-    # Matrix relationships.
-    #
-    # This is important for languages whose alphabet is not A-Z.
-    # ---------------------------------------------------------------
+                    "language": language,
+                    "source": (
+                        "relationship_matrix"
+                    ),
+                }
+            )
 
     index = letter_index(
-        letter,
-        lang,
+        clean,
+        language,
     )
 
-    if index is not None:
+    if index is None:
 
-        matrix = build_alphabet_matrix(
-            lang
+        return relationships
+
+    alphabet = (
+        get_language_alphabet(
+            language
+        ).upper()
+    )
+
+    matrix = (
+        build_alphabet_matrix(
+            language
+        )
+    )
+
+    if index >= len(
+        matrix
+    ):
+
+        return relationships
+
+    for other_index, connected in enumerate(
+        matrix[index]
+    ):
+
+        if not connected:
+            continue
+
+        if (
+            other_index
+            >= len(
+                alphabet
+            )
+        ):
+            continue
+
+        other = (
+            alphabet[
+                other_index
+            ]
         )
 
-        for other_index, connected in enumerate(
-            matrix[index]
-        ):
-
-            if not connected:
-                continue
-
-            if other_index >= len(alphabet):
-                continue
-
-            other = alphabet[other_index]
-
-            relationships.append({
-                "class": None,
-                "pair": f"{letter}{other}",
-                "letter": letter,
+        relationships.append(
+            {
+                "class": (
+                    get_relationship_class_for_letters(
+                        clean,
+                        other,
+                        language,
+                    )
+                ),
+                "pair": (
+                    f"{clean}{other}"
+                ),
+                "letter": clean,
                 "related_letter": other,
-                "language": lang,
+                "language": language,
                 "matrix": True,
-            })
+                "source": (
+                    "alphabet_matrix"
+                ),
+            }
+        )
 
     return relationships
 
@@ -632,18 +856,27 @@ def get_letter_relationships(
 def get_word_relationships(
     word: str,
     lang: str = "en",
-) -> List[Dict[str, object]]:
+) -> List[Dict[str, Any]]:
 
-    clean = str(word).strip()
+    language = normalize_language(
+        lang
+    )
 
-    relationships = []
+    clean = str(
+        word
+        or ""
+    ).strip()
+
+    relationships: List[
+        Dict[str, Any]
+    ] = []
 
     for letter in clean:
 
         relationships.extend(
             get_letter_relationships(
                 letter,
-                lang=lang,
+                lang=language,
             )
         )
 
@@ -658,11 +891,21 @@ def extract_alphabet_pairs(
     word: str,
 ) -> List[str]:
 
-    clean = str(word).strip().upper()
+    clean = str(
+        word
+        or ""
+    ).strip().upper()
 
     return [
-        clean[i:i + 2]
-        for i in range(len(clean) - 1)
+        clean[
+            index:index + 2
+        ]
+        for index in range(
+            max(
+                0,
+                len(clean) - 1,
+            )
+        )
     ]
 
 
@@ -675,18 +918,30 @@ def get_word_relationship_classes(
     lang: str = "en",
 ) -> List[int]:
 
-    classes = []
+    classes: List[int] = []
 
-    for pair in extract_alphabet_pairs(word):
+    for pair in (
+        extract_alphabet_pairs(
+            word
+        )
+    ):
 
-        class_id = get_relationship_class_for_letters(
-            pair[0],
-            pair[1],
-            lang=lang,
+        if len(pair) != 2:
+            continue
+
+        class_id = (
+            get_relationship_class_for_letters(
+                pair[0],
+                pair[1],
+                lang=lang,
+            )
         )
 
         if class_id is not None:
-            classes.append(class_id)
+
+            classes.append(
+                class_id
+            )
 
     return classes
 
@@ -709,235 +964,56 @@ def relationship_signature(
 
 
 # ============================================================================
-# MATRIX SIGNATURE
+# ALPHABET MATRIX SIGNATURE
 # ============================================================================
 
 def alphabet_matrix_signature(
     word: str,
     lang: str = "en",
-) -> Tuple[int, ...]:
-    """
-    Encode a word as a sequence of alphabet-matrix relationship signals.
+) -> Tuple[float, ...]:
 
-    1 = related letters
-    0 = unrelated letters
-    """
-
-    clean = str(word).strip()
+    clean = str(
+        word
+        or ""
+    ).strip()
 
     if len(clean) < 2:
+
         return ()
 
-    matrix = build_alphabet_matrix(lang)
+    language = normalize_language(
+        lang
+    )
 
-    result = []
+    matrix = (
+        build_alphabet_matrix(
+            language
+        )
+    )
 
-    for i in range(len(clean) - 1):
+    result: List[
+        float
+    ] = []
+
+    for index in range(
+        len(clean) - 1
+    ):
 
         a = letter_index(
-            clean[i],
-            lang,
+            clean[index],
+            language,
         )
 
         b = letter_index(
-            clean[i + 1],
-            lang,
+            clean[index + 1],
+            language,
         )
-
-        if a is None or b is None:
-            result.append(0)
-            continue
 
         if (
-            a >= len(matrix)
-            or b >= len(matrix)
+            a is None
+            or b is None
         ):
-            result.append(0)
-            continue
 
-        result.append(
-            matrix[a][b]
-        )
-
-    return tuple(result)
-
-
-# ============================================================================
-# RELATED WORD SIGNAL
-# ============================================================================
-
-def relationship_score(
-    word_a: str,
-    word_b: str,
-    lang: str = "en",
-) -> float:
-
-    sig_a = set(
-        relationship_signature(
-            word_a,
-            lang=lang,
-        )
-    )
-
-    sig_b = set(
-        relationship_signature(
-            word_b,
-            lang=lang,
-        )
-    )
-
-    if not sig_a or not sig_b:
-        return 0.0
-
-    intersection = sig_a & sig_b
-    union = sig_a | sig_b
-
-    if not union:
-        return 0.0
-
-    return (
-        len(intersection)
-        / len(union)
-    ) * 100.0
-
-
-# ============================================================================
-# MATRIX RELATIONSHIP SCORE
-# ============================================================================
-
-def alphabet_matrix_score(
-    word_a: str,
-    word_b: str,
-    lang: str = "en",
-) -> float:
-    """
-    Compare two words through their alphabet-matrix signatures.
-    """
-
-    sig_a = alphabet_matrix_signature(
-        word_a,
-        lang,
-    )
-
-    sig_b = alphabet_matrix_signature(
-        word_b,
-        lang,
-    )
-
-    if not sig_a or not sig_b:
-        return 0.0
-
-    size = min(
-        len(sig_a),
-        len(sig_b),
-    )
-
-    if size == 0:
-        return 0.0
-
-    matches = sum(
-        1
-        for a, b in zip(
-            sig_a[:size],
-            sig_b[:size],
-        )
-        if a == b
-    )
-
-    return (
-        matches / size
-    ) * 100.0
-
-
-# ============================================================================
-# RELATIONSHIP FEATURE VECTOR
-# ============================================================================
-
-def relationship_feature_vector(
-    word: str,
-    lang: str = "en",
-) -> List[float]:
-    """
-    Produce a deterministic feature vector suitable for WordChain and
-    future matrix/deep-learning operations.
-
-    Layout:
-
-        [25 relationship-class features]
-        +
-        [alphabet transition features]
-    """
-
-    classes = relationship_signature(
-        word,
-        lang=lang,
-    )
-
-    class_features = [
-        0.0
-        for _ in range(25)
-    ]
-
-    for class_id in classes:
-
-        if 1 <= class_id <= 25:
-            class_features[class_id - 1] = 1.0
-
-    matrix_features = [
-        float(x)
-        for x in alphabet_matrix_signature(
-            word,
-            lang=lang,
-        )
-    ]
-
-    return (
-        class_features
-        + matrix_features
-    )
-
-
-# ============================================================================
-# LANGUAGE INFORMATION
-# ============================================================================
-
-def language_info(
-    lang: str,
-) -> Dict[str, Any]:
-
-    alphabet = get_language_alphabet(lang)
-
-    return {
-        "language": str(lang).lower(),
-        "alphabet": alphabet,
-        "alphabet_size": len(alphabet),
-        "matrix_size": [
-            len(alphabet),
-            len(alphabet),
-        ],
-    }
-
-
-# ============================================================================
-# EXPORT
-# ============================================================================
-
-def export_matrix_registry() -> Dict[str, Any]:
-    """
-    Return the complete deterministic alphabet-matrix registry.
-
-    This is useful when the matrix later becomes part of the model
-    training/deployment metadata.
-    """
-
-    return {
-        "relationship_classes": {
-            str(class_id): list(pairs)
-            for class_id, pairs
-            in RELATION_MATRIX.items()
-        },
-        "languages": {
-            lang: language_info(lang)
-            for lang in supported_languages()
-        },
-    }
+            result.append(
+                0.0
+  
