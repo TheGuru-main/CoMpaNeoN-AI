@@ -3656,7 +3656,6 @@ def weighted_pair_score(
 
     )
 
-
 # ============================================================================
 # REGISTRY
 # ============================================================================
@@ -3708,4 +3707,46 @@ def matrix_math_registry(
 
             "symbol_signal",
 
+            "code_language_signal",
+
+            "external_signal",
+
+            "data_mixer_signal",
+
+            "grid_cv_signal",
+
+            "signal_similarity_matrix",
+
+            "candidate_context_comparison",
+
+        ],
+
+        "training": (
+            training_metadata(
+                examples
+            )
+        ),
+
+    }
+
+
+# ============================================================================
+# DEVELOPMENT
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+
+        json.dumps(
+
+            matrix_math_registry(),
+
+            indent=2,
+
+            default=str,
+
+        )
+
+    )
           
