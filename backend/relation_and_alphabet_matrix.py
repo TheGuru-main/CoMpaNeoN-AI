@@ -962,7 +962,6 @@ def relationship_signature(
         )
     )
 
-
 # ============================================================================
 # ALPHABET MATRIX SIGNATURE
 # ============================================================================
@@ -1016,4 +1015,847 @@ def alphabet_matrix_signature(
 
             result.append(
                 0.0
-  
+            )
+
+            continue
+
+        if (
+            a >= len(matrix)
+            or b >= len(matrix)
+        ):
+
+            result.append(
+                0.0
+            )
+
+            continue
+
+        result.append(
+            float(
+                matrix[a][b]
+            )
+        )
+
+    return tuple(
+        result
+    )
+
+
+# ============================================================================
+# RELATIONSHIP SCORE
+# ============================================================================
+
+def relationship_score(
+    word_a: str,
+    word_b: str,
+    lang: str = "en",
+) -> float:
+
+    signature_a = set(
+        relationship_signature(
+            word_a,
+            lang=lang,
+        )
+    )
+
+    signature_b = set(
+        relationship_signature(
+            word_b,
+            lang=lang,
+        )
+    )
+
+    if (
+        not signature_a
+        or not signature_b
+    ):
+
+        return 0.0
+
+    union = (
+        signature_a
+        | signature_b
+    )
+
+    if not union:
+
+        return 0.0
+
+    intersection = (
+        signature_a
+        & signature_b
+    )
+
+    return (
+        len(
+            intersection
+        )
+        / len(
+            union
+        )
+    ) * 100.0
+
+
+# ============================================================================
+# ALPHABET MATRIX SCORE
+# ============================================================================
+
+def alphabet_matrix_score(
+    word_a: str,
+    word_b: str,
+    lang: str = "en",
+) -> float:
+
+    signature_a = (
+        alphabet_matrix_signature(
+            word_a,
+            lang,
+        )
+    )
+
+    signature_b = (
+        alphabet_matrix_signature(
+            word_b,
+            lang,
+        )
+    )
+
+    if (
+        not signature_a
+        or not signature_b
+    ):
+
+        return 0.0
+
+    size = min(
+        len(
+            signature_a
+        ),
+        len(
+            signature_b
+        ),
+    )
+
+    if size <= 0:
+
+        return 0.0
+
+    matches = sum(
+        1
+        for left, right in zip(
+            signature_a[:size],
+            signature_b[:size],
+        )
+        if left == right
+    )
+
+    return (
+        matches
+        / size
+    ) * 100.0
+
+
+# ============================================================================
+# RELATIONSHIP FEATURE VECTOR
+# ============================================================================
+
+def relationship_feature_vector(
+    word: str,
+    lang: str = "en",
+) -> List[float]:
+
+    classes = (
+        relationship_signature(
+            word,
+            lang=lang,
+        )
+    )
+
+    class_features = [
+        0.0
+        for _ in range(
+            25
+        )
+    ]
+
+    for class_id in classes:
+
+        if (
+            1
+            <= class_id
+            <= 25
+        ):
+
+            class_features[
+                class_id - 1
+            ] = 1.0
+
+    matrix_features = [
+        float(
+            value
+        )
+        for value in (
+            alphabet_matrix_signature(
+                word,
+                lang=lang,
+            )
+        )
+    ]
+
+    return (
+        class_features
+        + matrix_features
+    )
+
+
+# ============================================================================
+# MATRIX MATHS ALPHABET BRIDGE
+# ============================================================================
+
+def matrix_maths_alphabet(
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """
+    Call Matrix Maths for the weighted mathematical representation of
+    this language's alphabet.
+
+    The local alphabet matrix remains the canonical substrate.
+    Matrix Maths adds mathematical weighting.
+    """
+
+    language = normalize_language(
+        lang
+    )
+
+    alphabet = (
+        get_language_alphabet(
+            language
+        )
+    )
+
+    if matrix_maths is None:
+
+        return {
+            "available": False,
+            "language": language,
+            "alphabet": alphabet,
+            "matrix": (
+                build_alphabet_matrix(
+                    language
+                )
+            ),
+        }
+
+    builder = getattr(
+        matrix_maths,
+        "build_alphabet_matrix",
+        None,
+    )
+
+    if not callable(
+        builder
+    ):
+
+        return {
+            "available": False,
+            "language": language,
+            "alphabet": alphabet,
+            "matrix": (
+                build_alphabet_matrix(
+                    language
+                )
+            ),
+        }
+
+    try:
+
+        weighted = builder(
+            alphabet,
+            RELATION_MATRIX,
+        )
+
+        return {
+            "available": True,
+            "language": language,
+            "alphabet": alphabet,
+            "matrix": weighted,
+        }
+
+    except Exception as exc:
+
+        return {
+            "available": False,
+            "language": language,
+            "alphabet": alphabet,
+            "matrix": (
+                build_alphabet_matrix(
+                    language
+                )
+            ),
+            "error": str(exc),
+        }
+
+
+# ============================================================================
+# MATRIX MATHS RELATIONSHIP BRIDGE
+# ============================================================================
+
+def matrix_maths_relationship(
+    word: str,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """
+    Send canonical relationship classes into Matrix Maths.
+
+    Matrix Maths remains responsible for mathematical relationship
+    representations.
+    """
+
+    language = normalize_language(
+        lang
+    )
+
+    classes = list(
+        relationship_signature(
+            word,
+            language,
+        )
+    )
+
+    if matrix_maths is None:
+
+        return {
+            "available": False,
+            "relationships": classes,
+        }
+
+    builder = getattr(
+        matrix_maths,
+        "relationship_signal_matrix",
+        None,
+    )
+
+    if not callable(
+        builder
+    ):
+
+        return {
+            "available": False,
+            "relationships": classes,
+        }
+
+    try:
+
+        result = builder(
+            classes
+        )
+
+        return {
+            "available": True,
+            "relationships": classes,
+            "matrix": result,
+        }
+
+    except Exception as exc:
+
+        return {
+            "available": False,
+            "relationships": classes,
+            "error": str(exc),
+        }
+
+
+# ============================================================================
+# MATRIX MATHS TEXT SIGNALS
+# ============================================================================
+
+def matrix_text_signals(
+    text: str,
+    lang: Optional[str] = None,
+    partition: Optional[Any] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Request the established Matrix Maths architecture to analyse text.
+
+    Matrix Maths owns:
+        domain
+        intent
+        directive
+        symbol
+        code-language
+        external
+        data-mixer
+        GridCV
+
+    This module only consumes those signals.
+    """
+
+    clean = str(
+        text
+        or ""
+    ).strip()
+
+    language = (
+        normalize_language(
+            lang
+        )
+        if lang
+        else detect_language(
+            clean
+        )
+    )
+
+    if matrix_maths is None:
+
+        return {
+            "available": False,
+            "language": language,
+            "signals": {},
+        }
+
+    result: Dict[
+        str,
+        Any
+    ] = {}
+
+    # --------------------------------------------------------------
+    # INTENT / DOMAIN
+    # --------------------------------------------------------------
+
+    analyzer = getattr(
+        matrix_maths,
+        "intent_domain_signal",
+        None,
+    )
+
+    if callable(
+        analyzer
+    ):
+
+        try:
+
+            result["intent"] = (
+                analyzer(
+                    clean
+                )
+            )
+
+        except Exception as exc:
+
+            result["intent"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # DIRECTIVES
+    # --------------------------------------------------------------
+
+    directive = getattr(
+        matrix_maths,
+        "directive_signal",
+        None,
+    )
+
+    if callable(
+        directive
+    ):
+
+        try:
+
+            result["directive"] = (
+                directive(
+                    clean
+                )
+            )
+
+        except Exception as exc:
+
+            result["directive"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # SYMBOLS
+    # --------------------------------------------------------------
+
+    domain = (
+        result.get(
+            "intent",
+            {},
+        ).get(
+            "domain",
+            "general",
+        )
+        if isinstance(
+            result.get(
+                "intent"
+            ),
+            dict,
+        )
+        else "general"
+    )
+
+    symbol = getattr(
+        matrix_maths,
+        "symbol_signal",
+        None,
+    )
+
+    if callable(
+        symbol
+    ):
+
+        try:
+
+            result["symbol"] = (
+                symbol(
+                    clean,
+                    domain=domain,
+                )
+            )
+
+        except Exception as exc:
+
+            result["symbol"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # CODE LANGUAGES
+    # --------------------------------------------------------------
+
+    code = getattr(
+        matrix_maths,
+        "code_language_signal",
+        None,
+    )
+
+    if callable(
+        code
+    ):
+
+        try:
+
+            result["code_language"] = (
+                code(
+                    clean
+                )
+            )
+
+        except Exception as exc:
+
+            result["code_language"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # EXTERNAL AVAILABILITY
+    # --------------------------------------------------------------
+
+    external = getattr(
+        matrix_maths,
+        "external_signal",
+        None,
+    )
+
+    if callable(
+        external
+    ):
+
+        try:
+
+            result["external"] = (
+                external(
+                    source
+                )
+            )
+
+        except Exception as exc:
+
+            result["external"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # DATA MIXER
+    # --------------------------------------------------------------
+
+    mixer = getattr(
+        matrix_maths,
+        "data_mixer_signal",
+        None,
+    )
+
+    if callable(
+        mixer
+    ):
+
+        try:
+
+            result["data_mixer"] = (
+                mixer(
+                    clean,
+                    lang=language,
+                )
+            )
+
+        except Exception as exc:
+
+            result["data_mixer"] = {
+                "error": str(exc)
+            }
+
+    # --------------------------------------------------------------
+    # GRID CV
+    # --------------------------------------------------------------
+
+    grid_cv = getattr(
+        matrix_maths,
+        "grid_cv_signal",
+        None,
+    )
+
+    if callable(
+        grid_cv
+    ):
+
+        try:
+
+            result["grid_cv"] = (
+                grid_cv(
+                    partition=partition
+                )
+            )
+
+        except Exception as exc:
+
+            result["grid_cv"] = {
+                "error": str(exc)
+            }
+
+    return {
+        "available": True,
+        "language": language,
+        "signals": result,
+    }
+
+
+# ============================================================================
+# UNIFIED RELATION AND ALPHABET ANALYSIS
+# ============================================================================
+
+def analyze_relation_and_alphabet(
+    text: str,
+    lang: Optional[str] = None,
+    partition: Optional[Any] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Unified entry point.
+
+    Flow:
+
+        text
+          ↓
+        tokenizer language authority
+          ↓
+        relation classes
+        alphabet matrix
+          ↓
+        Matrix Maths
+          ├── intent/domain
+          ├── directives
+          ├── symbols
+          ├── code languages
+          ├── external
+          ├── data mixer
+          └── GridCV
+          ↓
+        unified relation/alphabet signal
+          ↓
+        linguistic and semantic layers
+    """
+
+    clean = str(
+        text
+        or ""
+    ).strip()
+
+    language = (
+        normalize_language(
+            lang
+        )
+        if lang
+        else detect_language(
+            clean
+        )
+    )
+
+    words = [
+        word
+        for word in clean.split()
+        if word
+    ]
+
+    word_data: List[
+        Dict[str, Any]
+    ] = []
+
+    for word in words:
+
+        word_data.append(
+            {
+                "word": word,
+                "relationship_signature": (
+                    relationship_signature(
+                        word,
+                        language,
+                    )
+                ),
+                "alphabet_matrix_signature": (
+                    alphabet_matrix_signature(
+                        word,
+                        language,
+                    )
+                ),
+                "feature_vector": (
+                    relationship_feature_vector(
+                        word,
+                        language,
+                    )
+                ),
+            }
+        )
+
+    return {
+        "text": clean,
+        "language": language,
+        "alphabet": (
+            get_language_alphabet(
+                language
+            )
+        ),
+        "alphabet_size": len(
+            get_language_alphabet(
+                language
+            )
+        ),
+        "alphabet_matrix": (
+            build_alphabet_matrix(
+                language
+            )
+        ),
+        "matrix_maths_alphabet": (
+            matrix_maths_alphabet(
+                language
+            )
+        ),
+        "word_relationships": (
+            word_data
+        ),
+        "matrix_maths_relationships": [
+            matrix_maths_relationship(
+                word,
+                language,
+            )
+            for word in words
+        ],
+        "matrix_signals": (
+            matrix_text_signals(
+                clean,
+                lang=language,
+                partition=partition,
+                source=source,
+            )
+        ),
+    }
+
+
+# ============================================================================
+# LANGUAGE INFORMATION
+# ============================================================================
+
+def language_info(
+    lang: str,
+) -> Dict[str, Any]:
+
+    language = normalize_language(
+        lang
+    )
+
+    alphabet = (
+        get_language_alphabet(
+            language
+        )
+    )
+
+    return {
+        "language": language,
+        "alphabet": alphabet,
+        "alphabet_size": len(
+            alphabet
+        ),
+        "matrix_size": [
+            len(
+                alphabet
+            ),
+            len(
+                alphabet
+            ),
+        ],
+        "relationship_classes": 25,
+    }
+
+
+# ============================================================================
+# EXPORT MATRIX REGISTRY
+# ============================================================================
+
+def export_matrix_registry() -> Dict[
+    str,
+    Any,
+]:
+
+    return {
+        "relationship_classes": {
+            str(
+                class_id
+            ): list(
+                pairs
+            )
+            for class_id, pairs in (
+                RELATION_MATRIX.items()
+            )
+        },
+        "languages": {
+            language: language_info(
+                language
+            )
+            for language in (
+                supported_languages()
+            )
+        },
+        "matrix_maths_connected": (
+            matrix_maths
+            is not None
+        ),
+    }
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    sample = (
+        "CoMpaNeoN analyses relationships "
+        "between language and signals."
+    )
+
+    print(
+        analyze_relation_and_alphabet(
+            sample
+        )
+    )
