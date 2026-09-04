@@ -1174,7 +1174,6 @@ def matrix_features(
 
     }
 
-
 # ============================================================================
 # INTENT ANALYZER SIGNAL
 # ============================================================================
@@ -1227,4 +1226,1260 @@ def intent_signal(
     domain = (
 
         result.get(
-            "dom
+            "domain"
+        )
+
+        or result.get(
+            "primary_domain"
+        )
+
+        or "general"
+
+    )
+
+    intent = (
+
+        result.get(
+            "intent"
+        )
+
+        or result.get(
+            "primary_intent"
+        )
+
+        or result.get(
+            "intent_type"
+        )
+
+        or "general"
+
+    )
+
+    result.setdefault(
+        "domain",
+        domain,
+    )
+
+    result.setdefault(
+        "intent",
+        intent,
+    )
+
+    return result
+
+
+# ============================================================================
+# DIRECTIVE SIGNAL
+# ============================================================================
+
+def directive_signal(
+    text: str,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    directive = "general"
+
+    if callable(
+        detect_directive
+    ):
+
+        try:
+
+            directive = (
+                detect_directive(
+                    text
+                )
+            )
+
+        except Exception:
+
+            directive = "general"
+
+    lowered = str(
+        text
+    ).lower()
+
+    matched = [
+
+        phrase
+
+        for phrase
+        in DIRECTIVES
+
+        if str(
+            phrase
+        ).lower()
+        in lowered
+
+    ]
+
+    return {
+
+        "directive": directive,
+
+        "matched": matched,
+
+        "count": len(
+            matched
+        ),
+
+    }
+
+
+# ============================================================================
+# SYMBOL SIGNAL
+# ============================================================================
+
+def symbol_signal(
+    text: str,
+    domain: str = "general",
+) -> Dict[
+    str,
+    Any,
+]:
+
+    symbols: List[
+        Any
+    ] = []
+
+    if callable(
+        recognize_symbols
+    ):
+
+        try:
+
+            symbols = list(
+                recognize_symbols(
+                    text,
+                    domain,
+                )
+            )
+
+        except Exception:
+
+            symbols = []
+
+    return {
+
+        "domain": domain,
+
+        "symbols": symbols,
+
+        "count": len(
+            symbols
+        ),
+
+    }
+
+
+# ============================================================================
+# CODE LANGUAGE SIGNAL
+# ============================================================================
+
+def code_language_signal(
+    text: str,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    lowered = str(
+        text
+    ).lower()
+
+    languages: List[
+        str
+    ] = []
+
+    terms: Dict[
+        str,
+        Any,
+    ] = {}
+
+    if callable(
+        get_language_list
+    ):
+
+        try:
+
+            for language in (
+                get_language_list()
+            ):
+
+                if (
+                    str(
+                        language
+                    ).lower()
+                    in lowered
+                ):
+
+                    languages.append(
+                        str(
+                            language
+                        )
+                    )
+
+        except Exception:
+
+            pass
+
+    if callable(
+        get_code_terms
+    ):
+
+        try:
+
+            for term, meaning in (
+                get_code_terms().items()
+            ):
+
+                if (
+                    str(
+                        term
+                    ).lower()
+                    in lowered
+                ):
+
+                    terms[
+                        str(term)
+                    ] = meaning
+
+        except Exception:
+
+            pass
+
+    return {
+
+        "languages": sorted(
+            set(
+                languages
+            )
+        ),
+
+        "terms": terms,
+
+        "language_count": len(
+            set(
+                languages
+            )
+        ),
+
+        "term_count": len(
+            terms
+        ),
+
+    }
+
+
+# ============================================================================
+# EXTERNAL SIGNAL
+# ============================================================================
+
+def external_signal(
+    source: Optional[
+        str
+    ] = None,
+) -> Dict[
+    str,
+    Any,
+]:
+    """
+    Calls the external architecture as an availability signal.
+
+    This does NOT fetch remote information.
+
+    WebCrawler remains responsible for acquisition.
+    external.py remains responsible for source adapters.
+    """
+
+    if external_module is None:
+
+        return {
+
+            "available": False,
+
+            "source": source,
+
+            "adapter": None,
+
+        }
+
+    requested = (
+
+        str(
+            source
+        ).strip().lower()
+
+        if source
+
+        else ""
+
+    )
+
+    adapters = sorted(
+
+        name
+
+        for name
+        in dir(
+            external_module
+        )
+
+        if (
+            name.startswith(
+                "fetch_"
+            )
+
+            or name.startswith(
+                "search_"
+            )
+        )
+
+    )
+
+    adapter = None
+
+    if requested:
+
+        candidates = (
+
+            f"fetch_{requested}",
+
+            f"search_{requested}",
+
+            requested,
+
+        )
+
+        for candidate in candidates:
+
+            if callable(
+
+                getattr(
+                    external_module,
+                    candidate,
+                    None,
+                )
+
+            ):
+
+                adapter = candidate
+
+                break
+
+    return {
+
+        "available": True,
+
+        "source": (
+            requested
+            or None
+        ),
+
+        "adapter": adapter,
+
+        "adapter_count": len(
+            adapters
+        ),
+
+        "adapters": adapters,
+
+    }
+
+
+# ============================================================================
+# DATA MIXER SIGNAL
+# ============================================================================
+
+def data_mixer_signal(
+    text: str,
+    lang: Optional[
+        str
+    ] = None,
+    source: str = "matrix_maths",
+    mixer: Optional[
+        Any
+    ] = None,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    active = mixer
+
+    if (
+        active is None
+        and DataMixer is not None
+    ):
+
+        try:
+
+            active = DataMixer()
+
+        except Exception:
+
+            active = None
+
+    if active is None:
+
+        return {
+
+            "available": False,
+
+            "record": {},
+
+        }
+
+    methods = (
+
+        "mix",
+
+        "mix_record",
+
+        "prepare",
+
+        "prepare_record",
+
+        "process",
+
+    )
+
+    for method_name in methods:
+
+        method = getattr(
+            active,
+            method_name,
+            None,
+        )
+
+        if not callable(
+            method
+        ):
+
+            continue
+
+        try:
+
+            value = method(
+                text,
+                lang=lang,
+                source=source,
+            )
+
+        except TypeError:
+
+            try:
+
+                value = method(
+                    text
+                )
+
+            except Exception:
+
+                continue
+
+        except Exception:
+
+            continue
+
+        return {
+
+            "available": True,
+
+            "method": method_name,
+
+            "record": (
+
+                value
+
+                if isinstance(
+                    value,
+                    dict,
+                )
+
+                else {
+                    "value": value
+                }
+
+            ),
+
+        }
+
+    return {
+
+        "available": True,
+
+        "method": None,
+
+        "record": {},
+
+    }
+
+
+# ============================================================================
+# GRID CV SIGNAL
+# ============================================================================
+
+def grid_cv_signal(
+    partition: Optional[
+        Any
+    ] = None,
+    grid_cv: Optional[
+        Any
+    ] = None,
+    vector_size: int = (
+        DEFAULT_SIGNAL_VECTOR_SIZE
+    ),
+) -> Dict[
+    str,
+    Any,
+]:
+
+    active = grid_cv
+
+    if (
+        active is None
+        and GridCV is not None
+    ):
+
+        try:
+
+            active = GridCV()
+
+        except Exception:
+
+            active = None
+
+    if partition is None:
+
+        return {
+
+            "available": (
+                active is not None
+            ),
+
+            "value": {},
+
+            "vector": (
+                deterministic_vector(
+                    {
+                        "partition": None
+                    },
+                    vector_size,
+                )
+            ),
+
+        }
+
+    if active is not None:
+
+        methods = (
+
+            "analyze",
+
+            "validate",
+
+            "represent",
+
+            "vectorize",
+
+            "partition_vector",
+
+            "project_context_vector",
+
+        )
+
+        for method_name in methods:
+
+            method = getattr(
+                active,
+                method_name,
+                None,
+            )
+
+            if not callable(
+                method
+            ):
+
+                continue
+
+            try:
+
+                value = method(
+                    partition
+                )
+
+            except Exception:
+
+                continue
+
+            payload = (
+
+                value
+
+                if isinstance(
+                    value,
+                    dict,
+                )
+
+                else {
+                    "value": value
+                }
+
+            )
+
+            return {
+
+                "available": True,
+
+                "method": method_name,
+
+                "value": payload,
+
+                "vector": (
+                    deterministic_vector(
+                        payload,
+                        vector_size,
+                    )
+                ),
+
+            }
+
+    payload = (
+
+        partition
+
+        if isinstance(
+            partition,
+            dict,
+        )
+
+        else {
+            "value": partition
+        }
+
+    )
+
+    return {
+
+        "available": (
+            active is not None
+        ),
+
+        "value": payload,
+
+        "vector": (
+            deterministic_vector(
+                payload,
+                vector_size,
+            )
+        ),
+
+    }
+
+
+# ============================================================================
+# CATEGORICAL MATRIX
+# ============================================================================
+
+def categorical_matrix(
+    values: Sequence[
+        Any
+    ],
+    vector_size: int = (
+        DEFAULT_SIGNAL_VECTOR_SIZE
+    ),
+) -> torch.Tensor:
+
+    rows = [
+
+        deterministic_vector(
+            value,
+            vector_size,
+        )
+
+        for value
+        in values
+
+    ]
+
+    if not rows:
+
+        return torch.zeros(
+
+            (
+                0,
+                int(
+                    vector_size
+                ),
+            ),
+
+            dtype=torch.float32,
+
+        )
+
+    return torch.stack(
+        rows
+    )
+
+
+# ============================================================================
+# SIGNAL SIMILARITY MATRIX
+# ============================================================================
+
+def signal_similarity_matrix(
+    signals: Mapping[
+        str,
+        Any,
+    ],
+    vector_size: int = (
+        DEFAULT_SIGNAL_VECTOR_SIZE
+    ),
+) -> Tuple[
+    List[str],
+    torch.Tensor,
+]:
+
+    names = list(
+        signals.keys()
+    )
+
+    if not names:
+
+        return (
+
+            [],
+
+            torch.zeros(
+                (
+                    0,
+                    0,
+                ),
+                dtype=torch.float32,
+            ),
+
+        )
+
+    vectors = {
+
+        name: deterministic_vector(
+            signals[
+                name
+            ],
+            vector_size,
+        )
+
+        for name
+        in names
+
+    }
+
+    matrix = torch.zeros(
+
+        (
+            len(
+                names
+            ),
+            len(
+                names
+            ),
+        ),
+
+        dtype=torch.float32,
+
+    )
+
+    for i, left_name in enumerate(
+        names
+    ):
+
+        for j, right_name in enumerate(
+            names
+        ):
+
+            matrix[
+                i,
+                j,
+            ] = cosine_similarity(
+
+                vectors[
+                    left_name
+                ],
+
+                vectors[
+                    right_name
+                ],
+
+            )
+
+    return (
+
+        names,
+
+        matrix,
+
+    )
+
+
+# ============================================================================
+# RELATIONSHIP SIGNAL MATRIX
+# ============================================================================
+
+def relationship_signal_matrix(
+    relationships: Sequence[
+        Any
+    ],
+    vector_size: int = (
+        DEFAULT_SIGNAL_VECTOR_SIZE
+    ),
+) -> Dict[
+    str,
+    Any,
+]:
+
+    labels = [
+
+        str(
+            item
+        )
+
+        for item
+        in relationships
+
+    ]
+
+    matrix = categorical_matrix(
+
+        labels,
+
+        vector_size,
+
+    )
+
+    if matrix.shape[0] == 0:
+
+        similarity = torch.zeros(
+
+            (
+                0,
+                0,
+            ),
+
+            dtype=torch.float32,
+
+        )
+
+    else:
+
+        similarity = torch.matmul(
+
+            matrix,
+
+            matrix.T,
+
+        )
+
+    return {
+
+        "relationships": labels,
+
+        "matrix": matrix,
+
+        "similarity": (
+
+            normalize_matrix(
+                similarity
+            )
+
+            if similarity.numel()
+
+            else similarity
+
+        ),
+
+    }
+
+
+# ============================================================================
+# DOMAIN SCORE
+# ============================================================================
+
+def domain_score(
+    domain: str,
+    candidate_domain: str,
+) -> float:
+
+    if (
+        not domain
+        or not candidate_domain
+    ):
+
+        return 0.0
+
+    return (
+
+        1.0
+
+        if (
+            str(
+                domain
+            ).lower()
+
+            == str(
+                candidate_domain
+            ).lower()
+        )
+
+        else 0.0
+
+    )
+
+
+# ============================================================================
+# INTENT SCORE
+# ============================================================================
+
+def intent_score(
+    intent: str,
+    candidate_intent: str,
+) -> float:
+
+    if (
+        not intent
+        or not candidate_intent
+    ):
+
+        return 0.0
+
+    return (
+
+        1.0
+
+        if (
+            str(
+                intent
+            ).lower()
+
+            == str(
+                candidate_intent
+            ).lower()
+        )
+
+        else 0.0
+
+    )
+
+
+# ============================================================================
+# SYMBOL SCORE
+# ============================================================================
+
+def symbol_score(
+    left: Sequence[
+        Any
+    ],
+    right: Sequence[
+        Any
+    ],
+) -> float:
+
+    left_set = {
+
+        str(
+
+            item[0]
+
+            if (
+                isinstance(
+                    item,
+                    (
+                        tuple,
+                        list,
+                    ),
+                )
+                and item
+            )
+
+            else item
+
+        ).lower()
+
+        for item
+        in left
+
+    }
+
+    right_set = {
+
+        str(
+
+            item[0]
+
+            if (
+                isinstance(
+                    item,
+                    (
+                        tuple,
+                        list,
+                    ),
+                )
+                and item
+            )
+
+            else item
+
+        ).lower()
+
+        for item
+        in right
+
+    }
+
+    if (
+        not left_set
+        or not right_set
+    ):
+
+        return 0.0
+
+    return (
+
+        len(
+            left_set
+            & right_set
+        )
+
+        / len(
+            left_set
+            | right_set
+        )
+
+    )
+
+
+def relationship_score(
+    relationships_a: Sequence[
+        Any
+    ],
+    relationships_b: Sequence[
+        Any
+    ],
+) -> float:
+
+    return symbol_score(
+
+        relationships_a,
+
+        relationships_b,
+
+    )
+
+
+# ============================================================================
+# SIGNAL WEIGHTED SCORE
+# ============================================================================
+
+def signal_weighted_score(
+    signal_scores: Mapping[
+        str,
+        float,
+    ],
+    weights: Optional[
+        Mapping[
+            str,
+            float,
+        ]
+    ] = None,
+) -> float:
+
+    if not signal_scores:
+
+        return 0.0
+
+    weights = (
+        weights
+        or {}
+    )
+
+    values: List[
+        float
+    ] = []
+
+    used_weights: List[
+        float
+    ] = []
+
+    for name, score in (
+        signal_scores.items()
+    ):
+
+        values.append(
+            float(
+                score
+            )
+        )
+
+        used_weights.append(
+
+            float(
+
+                weights.get(
+                    name,
+                    1.0,
+                )
+
+            )
+
+        )
+
+    return (
+        weighted_relationship_score(
+            values,
+            used_weights,
+        )
+    )
+
+
+# ============================================================================
+# COMPLETE MATRIX ANALYSIS
+# ============================================================================
+
+def analyze_matrix_signals(
+    text: str,
+    lang: Optional[
+        str
+    ] = None,
+    alphabet: Optional[
+        str
+    ] = None,
+    alphabet_relationships: Optional[
+        Mapping[
+            int,
+            Sequence[str],
+        ]
+    ] = None,
+    relationships: Optional[
+        Sequence[
+            Any
+        ]
+    ] = None,
+    partition: Optional[
+        Any
+    ] = None,
+    external_source: Optional[
+        str
+    ] = None,
+    data_mixer: Optional[
+        Any
+    ] = None,
+    grid_cv: Optional[
+        Any
+    ] = None,
+    vector_size: int = (
+        DEFAULT_SIGNAL_VECTOR_SIZE
+    ),
+) -> Dict[
+    str,
+    Any,
+]:
+    """
+    Unified Matrix Maths entry.
+
+    This function connects the already-established architecture without
+    taking ownership from the individual modules.
+    """
+
+    text = str(
+        text
+        or ""
+    )
+
+    intent_data = (
+        intent_signal(
+            text
+        )
+    )
+
+    domain = str(
+
+        intent_data.get(
+            "domain"
+        )
+
+        or "general"
+
+    )
+
+    intent = str(
+
+        intent_data.get(
+            "intent"
+        )
+
+        or "general"
+
+    )
+
+    directive_data = (
+        directive_signal(
+            text
+        )
+    )
+
+    symbols_data = (
+        symbol_signal(
+            text,
+            domain,
+        )
+    )
+
+    code_data = (
+        code_language_signal(
+            text
+        )
+    )
+
+    external_data = (
+        external_signal(
+            external_source
+        )
+    )
+
+    mixed_data = (
+        data_mixer_signal(
+            text,
+            lang=lang,
+            mixer=data_mixer,
+        )
+    )
+
+    cv_data = (
+        grid_cv_signal(
+            partition,
+            grid_cv,
+            vector_size,
+        )
+    )
+
+    relationship_data = (
+        relationship_signal_matrix(
+
+            relationships
+            or (),
+
+            vector_size,
+
+        )
+    )
+
+    alphabet_data: Dict[
+        str,
+        Any,
+    ] = {
+
+        "available": False,
+
+        "alphabet": (
+            alpha
