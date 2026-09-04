@@ -2341,7 +2341,6 @@ def signal_weighted_score(
         )
     )
 
-
 # ============================================================================
 # COMPLETE MATRIX ANALYSIS
 # ============================================================================
@@ -2482,4 +2481,1231 @@ def analyze_matrix_signals(
         "available": False,
 
         "alphabet": (
-            alpha
+            alphabet
+            or ""
+        ),
+
+        "features": {},
+
+    }
+
+    if alphabet:
+
+        try:
+
+            alpha_matrix = (
+                build_alphabet_matrix(
+
+                    alphabet,
+
+                    alphabet_relationships,
+
+                )
+            )
+
+            alphabet_data = {
+
+                "available": True,
+
+                "alphabet": alphabet,
+
+                "matrix": alpha_matrix,
+
+                "features": (
+                    matrix_features(
+
+                        text,
+
+                        alphabet,
+
+                        alpha_matrix,
+
+                    )
+                ),
+
+            }
+
+        except Exception as exc:
+
+            alphabet_data = {
+
+                "available": False,
+
+                "alphabet": alphabet,
+
+                "error": str(exc),
+
+                "features": {},
+
+            }
+
+    raw_signals = {
+
+        "intent": {
+
+            "domain": domain,
+
+            "intent": intent,
+
+            "entities": (
+                intent_data.get(
+                    "entities",
+                    [],
+                )
+            ),
+
+        },
+
+        "directive": (
+            directive_data
+        ),
+
+        "symbol": (
+            symbols_data
+        ),
+
+        "code_language": (
+            code_data
+        ),
+
+        "external": (
+            external_data
+        ),
+
+        "data_mixer": (
+            mixed_data
+        ),
+
+        "grid_cv": (
+            cv_data.get(
+                "value",
+                {},
+            )
+        ),
+
+        "relationship": (
+            list(
+                relationships
+                or ()
+            )
+        ),
+
+    }
+
+    signal_names, similarity = (
+        signal_similarity_matrix(
+
+            raw_signals,
+
+            vector_size,
+
+        )
+    )
+
+    signal_vectors = {
+
+        name: deterministic_vector(
+
+            value,
+
+            vector_size,
+
+        )
+
+        for name, value
+        in raw_signals.items()
+
+    }
+
+    return {
+
+        "text": text,
+
+        "language": lang,
+
+        "domain": domain,
+
+        "intent": intent,
+
+        "intent_analysis": (
+            intent_data
+        ),
+
+        "directive": (
+            directive_data
+        ),
+
+        "symbols": (
+            symbols_data
+        ),
+
+        "code_languages": (
+            code_data
+        ),
+
+        "external": (
+            external_data
+        ),
+
+        "data_mixer": (
+            mixed_data
+        ),
+
+        "grid_cv": (
+            cv_data
+        ),
+
+        "relationships": (
+            relationship_data
+        ),
+
+        "alphabet": (
+            alphabet_data
+        ),
+
+        "signal_names": (
+            signal_names
+        ),
+
+        "signal_vectors": (
+            signal_vectors
+        ),
+
+        "signal_similarity_matrix": (
+            similarity
+        ),
+
+        "signal_matrix": (
+            categorical_matrix(
+
+                [
+
+                    raw_signals[
+                        name
+                    ]
+
+                    for name
+                    in signal_names
+
+                ],
+
+                vector_size,
+
+            )
+        ),
+
+    }
+
+
+# ============================================================================
+# QUERY / CANDIDATE CONTEXT COMPARISON
+# ============================================================================
+
+def compare_matrix_contexts(
+    query_context: Mapping[
+        str,
+        Any,
+    ],
+    candidate_context: Mapping[
+        str,
+        Any,
+    ],
+    weights: Optional[
+        Mapping[
+            str,
+            float,
+        ]
+    ] = None,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    query_domain = str(
+        query_context.get(
+            "domain",
+            "",
+        )
+    )
+
+    candidate_domain = str(
+        candidate_context.get(
+            "domain",
+            "",
+        )
+    )
+
+    query_intent = str(
+        query_context.get(
+            "intent",
+            "",
+        )
+    )
+
+    candidate_intent = str(
+        candidate_context.get(
+            "intent",
+            "",
+        )
+    )
+
+    query_symbols = (
+
+        query_context.get(
+            "symbols",
+            {},
+        ).get(
+            "symbols",
+            [],
+        )
+
+        if isinstance(
+            query_context.get(
+                "symbols"
+            ),
+            dict,
+        )
+
+        else []
+
+    )
+
+    candidate_symbols = (
+
+        candidate_context.get(
+            "symbols",
+            {},
+        ).get(
+            "symbols",
+            [],
+        )
+
+        if isinstance(
+            candidate_context.get(
+                "symbols"
+            ),
+            dict,
+        )
+
+        else []
+
+    )
+
+    query_relationships = (
+
+        query_context.get(
+            "relationships",
+            {},
+        ).get(
+            "relationships",
+            [],
+        )
+
+        if isinstance(
+            query_context.get(
+                "relationships"
+            ),
+            dict,
+        )
+
+        else []
+
+    )
+
+    candidate_relationships = (
+
+        candidate_context.get(
+            "relationships",
+            {},
+        ).get(
+            "relationships",
+            [],
+        )
+
+        if isinstance(
+            candidate_context.get(
+                "relationships"
+            ),
+            dict,
+        )
+
+        else []
+
+    )
+
+    scores = {
+
+        "domain": (
+            domain_score(
+
+                query_domain,
+
+                candidate_domain,
+
+            )
+        ),
+
+        "intent": (
+            intent_score(
+
+                query_intent,
+
+                candidate_intent,
+
+            )
+        ),
+
+        "symbol": (
+            symbol_score(
+
+                query_symbols,
+
+                candidate_symbols,
+
+            )
+        ),
+
+        "relationship": (
+            relationship_score(
+
+                query_relationships,
+
+                candidate_relationships,
+
+            )
+        ),
+
+    }
+
+    query_vectors = (
+        query_context.get(
+            "signal_vectors",
+            {},
+        )
+    )
+
+    candidate_vectors = (
+        candidate_context.get(
+            "signal_vectors",
+            {},
+        )
+    )
+
+    shared = (
+
+        set(
+            query_vectors.keys()
+        )
+
+        & set(
+            candidate_vectors.keys()
+        )
+
+    )
+
+    vector_scores = {
+
+        name: cosine_similarity(
+
+            query_vectors[
+                name
+            ],
+
+            candidate_vectors[
+                name
+            ],
+
+        )
+
+        for name
+        in shared
+
+    }
+
+    if vector_scores:
+
+        scores[
+            "signal_vector"
+        ] = (
+
+            sum(
+                vector_scores.values()
+            )
+
+            / len(
+                vector_scores
+            )
+
+        )
+
+    return {
+
+        "scores": scores,
+
+        "vector_scores": (
+            vector_scores
+        ),
+
+        "score": (
+            signal_weighted_score(
+
+                scores,
+
+                weights,
+
+            )
+        ),
+
+    }
+
+
+# ============================================================================
+# DETERMINISTIC TRAINING EXAMPLES
+# ============================================================================
+
+def generate_math_example(
+    example_id: int,
+    dimension: int,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    if dimension < 2:
+
+        raise ValueError(
+            "Matrix dimension must "
+            "be >= 2."
+        )
+
+    example_id = int(
+        example_id
+    )
+
+    scale = (
+
+        (
+            example_id
+            % 17
+        )
+        + 1
+
+    ) / 17.0
+
+    matrix_values = []
+
+    for row in range(
+        dimension
+    ):
+
+        current_row = []
+
+        for col in range(
+            dimension
+        ):
+
+            base = (
+
+                (
+
+                    (
+                        example_id
+                        + 1
+                    )
+
+                    * (
+                        row
+                        + 1
+                    )
+
+                    * (
+                        col
+                        + 1
+                    )
+
+                )
+
+                % 19
+
+            ) / 19.0
+
+            diagonal_boost = (
+
+                0.25
+
+                if row == col
+
+                else 0.0
+
+            )
+
+            value = clamp(
+
+                base
+                * scale
+
+                + diagonal_boost
+
+            )
+
+            current_row.append(
+                round(
+                    value,
+                    6,
+                )
+            )
+
+        matrix_values.append(
+            current_row
+        )
+
+    vector = [
+
+        round(
+
+            (
+
+                (
+
+                    example_id
+                    + index
+                    + 1
+
+                )
+
+                % 11
+
+            ) / 10.0,
+
+            6,
+
+        )
+
+        for index
+        in range(
+            dimension
+        )
+
+    ]
+
+    matrix = torch.tensor(
+        matrix_values,
+        dtype=torch.float32,
+    )
+
+    vector_tensor = torch.tensor(
+        vector,
+        dtype=torch.float32,
+    )
+
+    result = (
+        matrix_vector_multiply(
+
+            matrix,
+
+            vector_tensor,
+
+        )
+    )
+
+    normalized = (
+        normalize_matrix(
+
+            result.reshape(
+                1,
+                -1,
+            )
+
+        ).flatten()
+    )
+
+    relationship_class = (
+
+        (
+            (
+                example_id
+                - 1
+            )
+
+            % 25
+        )
+
+        + 1
+
+    )
+
+    return {
+
+        "id": example_id,
+
+        "operation": (
+            "matrix_vector_multiplication"
+        ),
+
+        "dimension": dimension,
+
+        "matrix": (
+            matrix_values
+        ),
+
+        "vector": vector,
+
+        "expected": [
+
+            round(
+                float(value),
+                6,
+            )
+
+            for value
+            in result.tolist()
+
+        ],
+
+        "normalized_expected": [
+
+            round(
+                float(value),
+                6,
+            )
+
+            for value
+            in normalized.tolist()
+
+        ],
+
+        "relationship_class": (
+            relationship_class
+        ),
+
+        "weight": (
+
+            round(
+
+                relationship_weight(
+
+                    relationship_class,
+
+                    example_id
+                    % 13,
+
+                ),
+
+                6,
+
+            )
+
+        ),
+
+    }
+
+
+def generate_training_examples(
+    count: int = (
+        DEFAULT_EXAMPLE_COUNT
+    ),
+) -> List[
+    Dict[
+        str,
+        Any,
+    ]
+]:
+
+    if int(count) <= 0:
+
+        return []
+
+    dimensions = (
+
+        2,
+
+        3,
+
+        4,
+
+        5,
+
+        6,
+
+        8,
+
+    )
+
+    return [
+
+        generate_math_example(
+
+            example_id,
+
+            dimensions[
+
+                (
+                    example_id
+                    - 1
+                )
+
+                % len(
+                    dimensions
+                )
+
+            ],
+
+        )
+
+        for example_id
+        in range(
+
+            1,
+
+            int(count)
+            + 1,
+
+        )
+
+    ]
+
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+
+def validate_math_example(
+    example: Mapping[
+        str,
+        Any,
+    ],
+) -> bool:
+
+    calculated = (
+        matrix_vector_multiply(
+
+            example[
+                "matrix"
+            ],
+
+            example[
+                "vector"
+            ],
+
+        )
+    )
+
+    expected = torch.tensor(
+
+        example[
+            "expected"
+        ],
+
+        dtype=torch.float32,
+
+    )
+
+    return bool(
+
+        torch.allclose(
+
+            calculated,
+
+            expected,
+
+            atol=1e-5,
+
+            rtol=1e-5,
+
+        )
+
+    )
+
+
+def validate_training_examples(
+    examples: Sequence[
+        Mapping[
+            str,
+            Any,
+        ]
+    ],
+) -> Dict[
+    str,
+    Any,
+]:
+
+    invalid = [
+
+        example.get(
+            "id"
+        )
+
+        for example
+        in examples
+
+        if not validate_math_example(
+            example
+        )
+
+    ]
+
+    return {
+
+        "total": len(
+            examples
+        ),
+
+        "valid": (
+
+            len(
+                examples
+            )
+
+            - len(
+                invalid
+            )
+
+        ),
+
+        "invalid": len(
+            invalid
+        ),
+
+        "invalid_ids": (
+            invalid
+        ),
+
+        "passed": (
+            not invalid
+        ),
+
+    }
+
+
+# ============================================================================
+# DATASET METADATA
+# ============================================================================
+
+def training_metadata(
+    examples: Sequence[
+        Mapping[
+            str,
+            Any,
+        ]
+    ],
+) -> Dict[
+    str,
+    Any,
+]:
+
+    return {
+
+        "dataset": (
+            "CoMpaNeoN Matrix Mathematics"
+        ),
+
+        "version": 2,
+
+        "deterministic": True,
+
+        "example_count": len(
+            examples
+        ),
+
+        "dimensions": sorted(
+
+            {
+
+                int(
+                    example[
+                        "dimension"
+                    ]
+                )
+
+                for example
+                in examples
+
+            }
+
+        ),
+
+        "relationship_classes": sorted(
+
+            {
+
+                int(
+
+                    example[
+                        "relationship_class"
+                    ]
+
+                )
+
+                for example
+                in examples
+
+            }
+
+        ),
+
+        "validation": (
+            validate_training_examples(
+                examples
+            )
+        ),
+
+    }
+
+
+# ============================================================================
+# SAVE TRAINING DATA
+# ============================================================================
+
+def save_training_examples(
+    path: str = (
+        "data/alphabet_matrix_math.json"
+    ),
+    count: int = (
+        DEFAULT_EXAMPLE_COUNT
+    ),
+) -> Dict[
+    str,
+    Any,
+]:
+
+    examples = (
+        generate_training_examples(
+            count
+        )
+    )
+
+    metadata = (
+        training_metadata(
+            examples
+        )
+    )
+
+    directory = os.path.dirname(
+        path
+    )
+
+    if directory:
+
+        os.makedirs(
+
+            directory,
+
+            exist_ok=True,
+
+        )
+
+    with open(
+
+        path,
+
+        "w",
+
+        encoding="utf-8",
+
+    ) as file:
+
+        json.dump(
+
+            {
+
+                "metadata": metadata,
+
+                "examples": examples,
+
+            },
+
+            file,
+
+            ensure_ascii=False,
+
+            indent=2,
+
+        )
+
+    return metadata
+
+
+# ============================================================================
+# LOAD TRAINING DATA
+# ============================================================================
+
+def load_training_examples(
+    path: str = (
+        "data/alphabet_matrix_math.json"
+    ),
+) -> List[
+    Dict[
+        str,
+        Any,
+    ]
+]:
+
+    if not os.path.exists(
+        path
+    ):
+
+        return []
+
+    with open(
+
+        path,
+
+        "r",
+
+        encoding="utf-8",
+
+    ) as file:
+
+        payload = json.load(
+            file
+        )
+
+    return list(
+
+        payload.get(
+
+            "examples",
+
+            [],
+
+        )
+
+    )
+
+
+# ============================================================================
+# PAIR WEIGHT COMPATIBILITY
+# ============================================================================
+
+def build_pair_weight_map(
+    relationship_matrix: Mapping[
+        int,
+        Sequence[
+            str
+        ],
+    ],
+) -> Dict[
+    str,
+    float,
+]:
+
+    result = {}
+
+    for class_id, pairs in (
+        relationship_matrix.items()
+    ):
+
+        for position, pair in enumerate(
+            pairs
+        ):
+
+            pair = str(
+                pair
+            ).strip().upper()
+
+            if len(pair) != 2:
+
+                continue
+
+            result[
+                pair
+            ] = (
+                relationship_weight(
+
+                    int(
+                        class_id
+                    ),
+
+                    position,
+
+                )
+            )
+
+    return result
+
+
+def weighted_pair_score(
+    pair: str,
+    pair_weights: Mapping[
+        str,
+        float,
+    ],
+) -> float:
+
+    pair = str(
+        pair
+    ).strip().upper()
+
+    if pair in pair_weights:
+
+        return float(
+            pair_weights[
+                pair
+            ]
+        )
+
+    return float(
+
+        pair_weights.get(
+
+            pair[::-1],
+
+            0.0,
+
+        )
+
+    )
+
+
+# ============================================================================
+# REGISTRY
+# ============================================================================
+
+def matrix_math_registry(
+    example_count: int = (
+        DEFAULT_EXAMPLE_COUNT
+    ),
+) -> Dict[
+    str,
+    Any,
+]:
+
+    examples = (
+        generate_training_examples(
+            example_count
+        )
+    )
+
+    return {
+
+        "module": (
+            "matrix_maths"
+        ),
+
+        "version": 2,
+
+        "deterministic": True,
+
+        "signals": list(
+            SIGNAL_NAMES
+        ),
+
+        "operations": [
+
+            "matrix_multiplication",
+
+            "matrix_vector_multiplication",
+
+            "relationship_propagation",
+
+            "relationship_similarity",
+
+            "domain_signal",
+
+            "intent_signal",
+
+            "directive_signal",
+
+            "symbol_signal",
+
+          
