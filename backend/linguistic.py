@@ -1056,4 +1056,1138 @@ def analyze_assonance(
     lang: str,
 ) -> Dict[str, Any]:
 
+    words = _words(
+        text
+    )
+
+    vowel_data = analyze_vowels(
+        text,
+        lang,
+    )
+
+    vowels = vowel_data[
+        "frequency"
+    ]
+
+    repeated = {
+        vowel: count
+        for vowel, count
+        in vowels.items()
+        if count > 1
+    }
+
+    word_patterns = []
+
+    inventory = vowel_inventory(
+        lang
+    )
+
+    for word in words:
+
+        pattern = "".join(
+            char
+            for char in word.lower()
+            if char in inventory
+        )
+
+        if pattern:
+            word_patterns.append({
+
+                "word":
+                    word,
+
+                "vowel_pattern":
+                    pattern,
+            })
+
+    return {
+
+        "repeated_vowels":
+            repeated,
+
+        "patterns":
+            word_patterns,
+
+        "assonance_strength":
+            (
+                sum(
+                    repeated.values()
+                )
+                / max(
+                    len(words),
+                    1,
+                )
+            ),
+    }
+
+
+# ============================================================================
+# RESONANCE
+# ============================================================================
+
+def analyze_resonance(
+    text: str,
+    lang: str,
+) -> Dict[str, Any]:
+
+    words = _words(
+        text
+    )
+
+    phonetics = phonetic_structure(
+        text,
+        lang,
+    )
+
+    endings = Counter()
+
+    for word in words:
+
+        if len(word) >= 2:
+
+            endings[
+                word[-2:]
+            ] += 1
+
+        elif word:
+
+            endings[
+                word
+            ] += 1
+
+    repeated_endings = {
+        ending: count
+        for ending, count
+        in endings.items()
+        if count > 1
+    }
+
+    patterns = Counter(
+        item["pattern"]
+        for item in phonetics[
+            "structures"
+        ]
+        if item.get(
+            "pattern"
+        )
+    )
+
+    repeated_patterns = {
+        pattern: count
+        for pattern, count
+        in patterns.items()
+        if count > 1
+    }
+
+    return {
+
+        "repeated_endings":
+            repeated_endings,
+
+        "repeated_phonetic_patterns":
+            repeated_patterns,
+
+        "resonance_strength":
+            (
+                (
+                    sum(
+                        repeated_endings.values()
+                    )
+                    +
+                    sum(
+                        repeated_patterns.values()
+                    )
+                )
+                /
+                max(
+                    len(words),
+                    1,
+                )
+            ),
+    }
+
+
+# ============================================================================
+# PARTS OF SPEECH
+# ============================================================================
+
+def _english_pos(
+    word: str,
+) -> str:
+
+    lower = (
+        word
+        .lower()
+    )
+
+    if lower in ENGLISH_INTERJECTIONS:
+        return "interjection"
+
+    if lower in ENGLISH_CONJUNCTIONS:
+        return "conjunction"
+
+    if lower in ENGLISH_PRONOUNS:
+        return "pronoun"
+
+    if lower in ENGLISH_ARTICLES:
+        return "article"
+
+    if lower in ENGLISH_PREPOSITIONS:
+        return "preposition"
+
+    if lower in ENGLISH_AUXILIARIES:
+        return "auxiliary"
+
+    if lower.endswith(
+        "ly"
+    ):
+        return "adverb"
+
+    if lower.endswith(
+        (
+            "ing",
+            "ed",
+        )
+    ):
+        return "verb"
+
+    if lower.endswith(
+        (
+            "ous",
+            "ful",
+            "ive",
+            "able",
+            "ible",
+            "al",
+            "ic",
+        )
+    ):
+        return "adjective"
+
+    if lower.endswith(
+        (
+            "tion",
+            "ment",
+            "ness",
+            "ity",
+            "ship",
+            "ism",
+        )
+    ):
+        return "noun"
+
+    return "unknown"
+
+
+def analyze_parts_of_speech(
+    tokens: Sequence[
+        Dict[str, Any]
+    ],
+    lang: str,
+) -> Dict[str, Any]:
+
+    language = normalize_lang(
+        lang
+    )
+
+    entries = []
+
+    counts = Counter()
+
+    for token in tokens:
+
+        word = (
+            token.get(
+                "stem"
+            )
+            or token.get(
+                "original"
+            )
+            or ""
+        )
+
+        if not word:
+            continue
+
+        if language == "en":
+
+            pos = _english_pos(
+                word
+            )
+
+        else:
+
+            # Multilingual-safe baseline.
+
+            if word in ENGLISH_CONJUNCTIONS:
+                pos = "conjunction"
+
+            elif word in ENGLISH_INTERJECTIONS:
+                pos = "interjection"
+
+            else:
+                pos = "unknown"
+
+        counts[
+            pos
+        ] += 1
+
+        entries.append({
+
+            "word":
+                word,
+
+            "pos":
+                pos,
+        })
+
+    return {
+
+        "language":
+            language,
+
+        "tokens":
+            entries,
+
+        "counts":
+            dict(counts),
+    }
+
+
+# ============================================================================
+# CONJUNCTIONS
+# ============================================================================
+
+def analyze_conjunctions(
+    words: Iterable[str],
+    lang: str,
+) -> Dict[str, Any]:
+
+    language = normalize_lang(
+        lang
+    )
+
+    found = []
+
+    if language == "en":
+
+        for word in words:
+
+            if word.lower() in ENGLISH_CONJUNCTIONS:
+
+                found.append(
+                    word
+                )
+
+    return {
+
+        "language":
+            language,
+
+        "items":
+            found,
+
+        "count":
+            len(found),
+    }
+
+
+# ============================================================================
+# INTERJECTIONS
+# ============================================================================
+
+def analyze_interjections(
+    words: Iterable[str],
+    lang: str,
+) -> Dict[str, Any]:
+
+    language = normalize_lang(
+        lang
+    )
+
+    found = []
+
+    if language == "en":
+
+        for word in words:
+
+            if word.lower() in ENGLISH_INTERJECTIONS:
+
+                found.append(
+                    word
+                )
+
+    return {
+
+        "language":
+            language,
+
+        "items":
+            found,
+
+        "count":
+            len(found),
+    }
+
+
+# ============================================================================
+# INTERNAL SEMANTIC RELATIONSHIPS
+# ============================================================================
+
+def semantic_relationships(
+    words: Sequence[str],
+) -> Dict[str, Any]:
+
+    normalized = {
+        word.lower()
+        for word in words
+    }
+
+    relations: Dict[
+        str,
+        List[str]
+    ] = {}
+
+    for relation, hints in (
+        RELATION_HINTS.items()
+    ):
+
+        matched = sorted(
+            normalized
+            & hints
+        )
+
+        if matched:
+
+            relations[
+                relation
+            ] = matched
+
+    return relations
+
+
+# ============================================================================
+# HIERARCHICAL RELATIONSHIPS
+# ============================================================================
+
+def hierarchical_relationships(
+    words: Sequence[str],
+) -> Dict[str, Any]:
+
+    normalized = [
+        word.lower()
+        for word in words
+    ]
+
+    hierarchy_markers = {
+
+        "type",
+        "kind",
+        "class",
+        "category",
+        "parent",
+        "child",
+        "subclass",
+        "superclass",
+    }
+
+    found = [
+        word
+        for word in normalized
+        if word in hierarchy_markers
+    ]
+
+    return {
+
+        "markers":
+            found,
+
+        "hierarchy_detected":
+            bool(found),
+    }
+
+
+# ============================================================================
+# CLOSE-PROXY RELATIONSHIPS
+# ============================================================================
+
+def close_proxy_relationships(
+    words: Sequence[str],
+) -> Dict[str, Any]:
+
+    unique = []
+
+    seen = set()
+
+    for word in words:
+
+        lower = word.lower()
+
+        if lower in seen:
+            continue
+
+        seen.add(
+            lower
+        )
+
+        unique.append(
+            lower
+        )
+
+    pairs = []
+
+    for index, left in enumerate(
+        unique
+    ):
+
+        for right in unique[
+            index + 1:
+        ]:
+
+            if not left or not right:
+                continue
+
+            shared = (
+                len(
+                    set(left)
+                    &
+                    set(right)
+                )
+                /
+                max(
+                    len(
+                        set(left)
+                        |
+                        set(right)
+                    ),
+                    1,
+                )
+            )
+
+            prefix = 0
+
+            for a, b in zip(
+                left,
+                right,
+            ):
+
+                if a != b:
+                    break
+
+                prefix += 1
+
+            score = (
+                shared * 0.6
+                +
+                (
+                    prefix
+                    /
+                    max(
+                        max(
+                            len(left),
+                            len(right),
+                        ),
+                        1,
+                    )
+                )
+                * 0.4
+            )
+
+            if score >= 0.45:
+
+                pairs.append({
+
+                    "left":
+                        left,
+
+                    "right":
+                        right,
+
+                    "score":
+                        score,
+                })
+
+    return {
+
+        "pairs":
+            sorted(
+                pairs,
+                key=lambda item: item[
+                    "score"
+                ],
+                reverse=True,
+            ),
+    }
+
+
+# ============================================================================
+# IDIOMS
+# ============================================================================
+
+def detect_idioms(
+    text: str,
+) -> Dict[str, Any]:
+
+    clean = (
+        _clean_text(
+            text
+        )
+        .lower()
+    )
+
+    found = [
+
+        idiom
+
+        for idiom in COMMON_IDIOMS
+
+        if idiom in clean
+    ]
+
+    return {
+
+        "items":
+            found,
+
+        "count":
+            len(found),
+    }
+
+
+# ============================================================================
+# FIGURES OF SPEECH
+# ============================================================================
+
+def detect_figures_of_speech(
+    text: str,
+) -> Dict[str, Any]:
+
+    clean = (
+        _clean_text(
+            text
+        )
+        .lower()
+    )
+
+    detected = []
+
+    if re.search(
+        r"\blike\b",
+        clean,
+    ):
+
+        detected.append(
+            "possible_simile"
+        )
+
+    if re.search(
+        r"\bas\s+\w+\s+as\b",
+        clean,
+    ):
+
+        detected.append(
+            "possible_simile"
+        )
+
+    if (
+        "represents" in clean
+        or "symbolizes" in clean
+    ):
+
+        detected.append(
+            "possible_symbolism"
+        )
+
+    return {
+
+        "items":
+            sorted(
+                set(detected)
+            ),
+    }
+
+
+# ============================================================================
+# LINGUISTIC PATTERNS
+# ============================================================================
+
+def linguistic_patterns(
+    text: str,
+) -> Dict[str, Any]:
+
+    words = _words(
+        text
+    )
+
+    bigrams = Counter(
+        " ".join(pair)
+        for pair in zip(
+            words,
+            words[1:],
+        )
+    )
+
+    repeated_bigrams = {
+
+        pair: count
+
+        for pair, count in (
+            bigrams.items()
+        )
+
+        if count > 1
+    }
+
+    repeated_words = {
+
+        word: count
+
+        for word, count in (
+            Counter(words).items()
+        )
+
+        if count > 1
+    }
+
+    return {
+
+        "repeated_words":
+            repeated_words,
+
+        "repeated_bigrams":
+            repeated_bigrams,
+
+        "word_sequence":
+            words,
+    }
+
+
+# ============================================================================
+# SEMANTIC ANALYSIS
+# ============================================================================
+
+def semantic_analysis(
+    text: str,
+    words: Sequence[str],
+) -> Dict[str, Any]:
+
+    relations = semantic_relationships(
+        words
+    )
+
+    hierarchy = hierarchical_relationships(
+        words
+    )
+
+    idioms = detect_idioms(
+        text
+    )
+
+    figures = detect_figures_of_speech(
+        text
+    )
+
+    return {
+
+        "relations":
+            relations,
+
+        "hierarchy":
+            hierarchy,
+
+        "idioms":
+            idioms,
+
+        "figures_of_speech":
+            figures,
+
+        "semantic_relation_count":
+            len(relations),
+
+        "figurative_language_detected":
+            bool(
+                idioms["items"]
+                or figures["items"]
+            ),
+    }
+
+
+# ============================================================================
+# DICTIONARY RESULT NORMALIZATION
+# ============================================================================
+
+def normalize_dictionary_result(
+    result: Any,
+) -> Dict[str, Any]:
+    """
+    Normalize external.py dictionary output without forcing a provider
+    shape onto the linguistic layer.
+    """
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+
+        return {
+
+            "available":
+                False,
+
+            "raw":
+                result,
+        }
+
+    meanings = (
+        result.get(
+            "meanings"
+        )
+        or []
+    )
+
+    definitions = []
+
+    synonyms = set()
+
+    antonyms = set()
+
+    examples = []
+
+    phonetics = []
+
+    etymology = (
+        result.get(
+            "etymology"
+        )
+        or result.get(
+            "origin"
+        )
+    )
+
+    if result.get(
+        "phonetic"
+    ):
+
+        phonetics.append(
+            result[
+                "phonetic"
+            ]
+        )
+
+    if result.get(
+        "phonetics"
+    ):
+
+        for item in result[
+            "phonetics"
+        ]:
+
+            if isinstance(
+                item,
+                dict,
+            ):
+
+                value = (
+                    item.get(
+                        "text"
+                    )
+                    or item.get(
+                        "phonetic"
+                    )
+                )
+
+                if value:
+
+                    phonetics.append(
+                        value
+                    )
+
+    for meaning in meanings:
+
+        if not isinstance(
+            meaning,
+            dict,
+        ):
+            continue
+
+        for synonym in (
+            meaning.get(
+                "synonyms"
+            )
+            or []
+        ):
+
+            synonyms.add(
+                str(synonym)
+            )
+
+        for antonym in (
+            meaning.get(
+                "antonyms"
+            )
+            or []
+        ):
+
+            antonyms.add(
+                str(antonym)
+            )
+
+        for definition in (
+            meaning.get(
+                "definitions"
+            )
+            or []
+        ):
+
+            if not isinstance(
+                definition,
+                dict,
+            ):
+                continue
+
+            value = definition.get(
+                "definition"
+            )
+
+            if value:
+
+                definitions.append(
+                    str(value)
+                )
+
+            example = definition.get(
+                "example"
+            )
+
+            if example:
+
+                examples.append(
+                    str(example)
+                )
+
+            for synonym in (
+                definition.get(
+                    "synonyms"
+                )
+                or []
+            ):
+
+                synonyms.add(
+                    str(synonym)
+                )
+
+            for antonym in (
+                definition.get(
+                    "antonyms"
+                )
+                or []
+            ):
+
+                antonyms.add(
+                    str(antonym)
+                )
+
+    return {
+
+        "available":
+            True,
+
+        "definitions":
+            definitions,
+
+        "meanings":
+            meanings,
+
+        "synonyms":
+            sorted(synonyms),
+
+        "antonyms":
+            sorted(antonyms),
+
+        "examples":
+            examples,
+
+        "phonetics":
+            phonetics,
+
+        "word_forms":
+            result.get(
+                "word_forms",
+                []
+            ),
+
+        "etymology":
+            etymology,
+
+        "raw":
+            result,
+    }
+
+
+# ============================================================================
+# EXTERNAL DICTIONARY ENRICHMENT
+# ============================================================================
+
+async def enrich_dictionary(
+    word: str,
+) -> Dict[str, Any]:
+    """
+    Ask external.py for dictionary enrichment.
+
+    external.py owns provider communication.
+
+    linguistic.py owns integration of the returned enrichment.
+    """
+
+    clean = (
+        str(word or "")
+        .strip()
+    )
+
+    if not clean:
+
+        return {
+
+            "available":
+                False,
+
+            "reason":
+                "empty_word",
+        }
+
+    if not callable(
+        fetch_dictionary
+    ):
+
+        return {
+
+            "available":
+                False,
+
+            "reason":
+                "dictionary_adapter_unavailable",
+        }
+
+    try:
+
+        result = fetch_dictionary(
+            clean
+        )
+
+        if inspect.isawaitable(
+            result
+        ):
+
+            result = await result
+
+        return normalize_dictionary_result(
+            result
+        )
+
+    except Exception as exc:
+
+        return {
+
+            "available":
+                False,
+
+            "error":
+                str(exc),
+        }
+
+
+async def enrich_tokens(
+    words: Sequence[str],
+    limit: int = 8,
+) -> Dict[str, Any]:
+    """
+    Enrich selected lexical units through external.py.
+
+    The limit prevents dictionary acquisition from turning ordinary
+    linguistic analysis into uncontrolled external crawling.
+    """
+
+    selected = []
+
+    seen = set()
+
+    for word in words:
+
+        clean = (
+            str(word or "")
+            .strip()
+            .lower()
+        )
+
+        if not clean:
+            continue
+
+        if clean in seen:
+            continue
+
+        seen.add(
+            clean
+        )
+
+        selected.append(
+            clean
+        )
+
+        if len(selected) >= limit:
+            break
+
+    if not selected:
+
+        return {}
+
+    results = await asyncio.gather(
+        *[
+            enrich_dictionary(
+                word
+            )
+            for word in selected
+        ],
+        return_exceptions=True,
+    )
+
+    output = {}
+
+    for word, result in zip(
+        selected,
+        results,
+    ):
+
+        if isinstance(
+            result,
+            Exception,
+        ):
+
+            output[word] = {
+
+                "available":
+                    False,
+
+                "error":
+                    str(result),
+            }
+
+        else:
+
+            output[word] = result
+
+    return output
+
+
+# ============================================================================
+# INTERNAL + EXTERNAL LEXICAL ENRICHMENT
+# ============================================================================
+
+def internal_lexical_enrichment(
+    words: Sequence[str],
+) -> Dict[str, Any]:
+    """
+    Internal lexical baseline.
+
+    This deliberately exists independently of 
+
  
