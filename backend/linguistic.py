@@ -2188,6 +2188,746 @@ def internal_lexical_enrichment(
     """
     Internal lexical baseline.
 
-    This deliberately exists independently of 
+    This deliberately exists independently of external dictionaries.
+    """
 
+    normalized = []
+
+    seen = set()
+
+    for word in words:
+
+        lower = word.lower()
+
+        if lower in seen:
+            continue
+
+        seen.add(
+            lower
+        )
+
+        normalized.append(
+            lower
+        )
+
+    proxies = close_proxy_relationships(
+        normalized
+    )
+
+    return {
+
+        "words":
+            normalized,
+
+        "close_proxy":
+            proxies,
+
+        "semantic_relationships":
+            semantic_relationships(
+                normalized
+            ),
+
+        "hierarchical_relationships":
+            hierarchical_relationships(
+                normalized
+            ),
+    }
+
+
+# ============================================================================
+# MATRIX SIGNAL CONSUMPTION
+# ============================================================================
+
+def consume_matrix_signals(
+    text: str,
+    lang: str,
+) -> Dict[str, Any]:
+
+    output = {}
+
+    if callable(
+        intent_domain_signal
+    ):
+
+        try:
+
+            output[
+                "intent_domain"
+            ] = intent_domain_signal(
+                text
+            )
+
+        except Exception as exc:
+
+            output[
+                "intent_domain"
+            ] = {
+
+                "error":
+                    str(exc),
+            }
+
+    if callable(
+        directive_signal
+    ):
+
+        try:
+
+            output[
+                "directive"
+            ] = directive_signal(
+                text
+            )
+
+        except Exception as exc:
+
+            output[
+                "directive"
+            ] = {
+
+                "error":
+                    str(exc),
+            }
+
+    if callable(
+        symbol_signal
+    ):
+
+        try:
+
+            domain = (
+                _safe_dict(
+                    output.get(
+                        "intent_domain"
+                    )
+                )
+                .get(
+                    "domain",
+                    "general",
+                )
+            )
+
+            output[
+                "symbol"
+            ] = symbol_signal(
+                text,
+                domain=domain,
+            )
+
+        except Exception as exc:
+
+            output[
+                "symbol"
+            ] = {
+
+                "error":
+                    str(exc),
+            }
+
+    if callable(
+        code_language_signal
+    ):
+
+        try:
+
+            output[
+                "code_language"
+            ] = code_language_signal(
+                text
+            )
+
+        except Exception as exc:
+
+            output[
+                "code_language"
+            ] = {
+
+                "error":
+                    str(exc),
+            }
+
+    if callable(
+        data_mixer_signal
+    ):
+
+        try:
+
+            output[
+                "data_mixer"
+            ] = data_mixer_signal(
+                text,
+                lang=lang,
+            )
+
+        except Exception as exc:
+
+            output[
+                "data_mixer"
+            ] = {
+
+                "error":
+                    str(exc),
+            }
+
+    return output
+
+
+# ============================================================================
+# QUESTION INTERPRETATION BRIDGE
+# ============================================================================
+
+def question_interpretation(
+    text: str,
+) -> Dict[str, Any]:
+
+    if not callable(
+        detect_question_type
+    ):
+
+        return {
+
+            "available":
+                False,
+        }
+
+    try:
+
+        result = detect_question_type(
+            text
+        )
+
+        return {
+
+            "available":
+                True,
+
+            "result":
+                result,
+        }
+
+    except Exception as exc:
+
+        return {
+
+            "available":
+                False,
+
+            "error":
+                str(exc),
+        }
+
+
+# ============================================================================
+# LINGUISTIC ANALYZER
+# ============================================================================
+
+class LinguisticAnalyzer:
+    """
+    Canonical orchestration object for CoMpaNeoN's linguistic phase.
+
+    It consumes existing project authorities and assembles their output.
+
+    It does not replace those authorities.
+    """
+
+    def __init__(
+        self,
+        dictionary_limit: int = 8,
+    ) -> None:
+
+        self.dictionary_limit = max(
+            int(
+                dictionary_limit
+            ),
+            0,
+        )
+
+    # ========================================================================
+    # LANGUAGE
+    # ========================================================================
+
+    def resolve_language(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+    ) -> str:
+
+        if lang:
+
+            return normalize_lang(
+                lang
+            )
+
+        return detect_language(
+            text
+        )
+
+    # ========================================================================
+    # TOKENIZER
+    # ========================================================================
+
+    def tokenize(
+        self,
+        text: str,
+        lang: str,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        try:
+
+            return tokenize(
+                text,
+                lang,
+            )
+
+        except Exception:
+
+            return []
+
+    # ========================================================================
+    # INTERNAL ANALYSIS
+    # ========================================================================
+
+    def analyze_internal(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        clean = _clean_text(
+            text
+        )
+
+        language = self.resolve_language(
+            clean,
+            lang,
+        )
+
+        tokens = self.tokenize(
+            clean,
+            language,
+        )
+
+        words = [
+
+            token.get(
+                "stem"
+            )
+            or token.get(
+                "original"
+            )
+
+            for token in tokens
+
+            if (
+                token.get(
+                    "stem"
+                )
+                or token.get(
+                    "original"
+                )
+            )
+        ]
+
+        structure = structural_analysis(
+            clean
+        )
+
+        return {
+
+            "text":
+                clean,
+
+            "language":
+                language,
+
+            "alphabet":
+                alphabet_for(
+                    language
+                ),
+
+            "tokens":
+                tokens,
+
+            "words":
+                words,
+
+            "structure":
+                structure,
+
+            "vowels":
+                analyze_vowels(
+                    clean,
+                    language,
+                ),
+
+            "consonants":
+                analyze_consonants(
+                    clean,
+                    language,
+                ),
+
+            "syllables":
+                analyze_syllabic_structure(
+                    clean,
+                    language,
+                ),
+
+            "phonetic":
+                phonetic_structure(
+                    clean,
+                    language,
+                ),
+
+            "assonance":
+                analyze_assonance(
+                    clean,
+                    language,
+                ),
+
+            "resonance":
+                analyze_resonance(
+                    clean,
+                    language,
+                ),
+
+            "parts_of_speech":
+                analyze_parts_of_speech(
+                    tokens,
+                    language,
+                ),
+
+            "conjunctions":
+                analyze_conjunctions(
+                    words,
+                    language,
+                ),
+
+            "interjections":
+                analyze_interjections(
+                    words,
+                    language,
+                ),
+
+            "lexical":
+                internal_lexical_enrichment(
+                    words
+                ),
+
+            "semantic":
+                semantic_analysis(
+                    clean,
+                    words,
+                ),
+
+            "patterns":
+                linguistic_patterns(
+                    clean
+                ),
+        }
+
+    # ========================================================================
+    # RELATION / ALPHABET MATRIX
+    # ========================================================================
+
+    def analyze_matrix(
+        self,
+        text: str,
+        lang: str,
+        partition: Optional[Any] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        if not callable(
+            analyze_relation_and_alphabet
+        ):
+
+            return {
+
+                "available":
+                    False,
+            }
+
+        try:
+
+            result = (
+                analyze_relation_and_alphabet(
+                    text,
+                    lang=lang,
+                    partition=partition,
+                    source=source,
+                )
+            )
+
+            return {
+
+                "available":
+                    True,
+
+                "result":
+                    result,
+            }
+
+        except Exception as exc:
+
+            return {
+
+                "available":
+                    False,
+
+                "error":
+                    str(exc),
+            }
+
+    # ========================================================================
+    # MATRIX MATHS
+    # ========================================================================
+
+    def analyze_matrix_maths(
+        self,
+        text: str,
+        lang: str,
+    ) -> Dict[str, Any]:
+
+        return consume_matrix_signals(
+            text,
+            lang,
+        )
+
+    # ========================================================================
+    # COMPLETE INTERNAL ANALYSIS
+    # ========================================================================
+
+    def analyze(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+        partition: Optional[Any] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        internal = self.analyze_internal(
+            text,
+            lang,
+        )
+
+        language = internal[
+            "language"
+        ]
+
+        matrix = self.analyze_matrix(
+            internal[
+                "text"
+            ],
+            language,
+            partition=partition,
+            source=source,
+        )
+
+        matrix_maths = (
+            self.analyze_matrix_maths(
+                internal[
+                    "text"
+                ],
+                language,
+            )
+        )
+
+        question = (
+            question_interpretation(
+                internal[
+                    "text"
+                ]
+            )
+        )
+
+        return {
+
+            "text":
+                internal[
+                    "text"
+                ],
+
+            "language":
+                language,
+
+            "internal":
+                internal,
+
+            "relation_and_alphabet":
+                matrix,
+
+            "matrix_maths":
+                matrix_maths,
+
+            "question":
+                question,
+        }
+
+    # ========================================================================
+    # EXTERNAL ENRICHMENT
+    # ========================================================================
+
+    async def enrich(
+        self,
+        analysis: Dict[
+            str,
+            Any,
+        ],
+    ) -> Dict[str, Any]:
+
+        words = (
+            analysis
+            .get(
+                "internal",
+                {},
+            )
+            .get(
+                "words",
+                []
+            )
+        )
+
+        if (
+            self.dictionary_limit
+            <= 0
+        ):
+
+            return {
+
+                "enabled":
+                    False,
+
+                "dictionary":
+                    {},
+            }
+
+        dictionary = await enrich_tokens(
+            words,
+            limit=self.dictionary_limit,
+        )
+
+        return {
+
+            "enabled":
+                True,
+
+            "dictionary":
+                dictionary,
+        }
+
+    # ========================================================================
+    # FULL ANALYSIS
+    # ========================================================================
+
+    async def analyze_full(
+        self,
+        text: str,
+        lang: Optional[str] = None,
+        partition: Optional[Any] = None,
+        source: Optional[str] = None,
+        dictionary: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Full linguistic pipeline.
+
+        Internal intelligence always runs first.
+
+        Dictionary enrichment is optional and additive.
+        """
+
+        analysis = self.analyze(
+            text,
+            lang=lang,
+            partition=partition,
+            source=source,
+        )
+
+        enrichment = {
+
+            "enabled":
+                False,
+
+            "dictionary":
+                {},
+        }
+
+        if dictionary:
+
+            enrichment = await self.enrich(
+                analysis
+            )
+
+        analysis[
+            "enrichment"
+        ] = enrichment
+
+        return analysis
+
+
+# ============================================================================
+# FUNCTIONAL API
+# ============================================================================
+
+def analyze_linguistics(
+    text: str,
+    lang: Optional[str] = None,
+    partition: Optional[Any] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+
+    analyzer = LinguisticAnalyzer()
+
+    return analyzer.analyze(
+        text,
+        lang=lang,
+        partition=partition,
+        source=source,
+    )
+
+
+async def analyze_linguistics_full(
+    text: str,
+    lang: Optional[str] = None,
+    partition: Optional[Any] = None,
+    source: Optional[str] = None,
+    dictionary: bool = True,
+    dictionary_limit: int = 8,
+) -> Dict[str, Any]:
+
+    analyzer = LinguisticAnalyzer(
+        dictionary_limit=dictionary_limit
+    )
+
+    return await analyzer.analyze_full(
+        text,
+        lang=lang,
+        partition=partition,
+        source=source,
+        dictionary=dictionary,
+    )
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    sample = (
+        "Wow, explain why language and relationships "
+        "resonate like music, because patterns connect "
+        "words and meaning."
+    )
+
+    analyzer = LinguisticAnalyzer()
+
+    result = analyzer.analyze(
+        sample
+    )
+
+    print(
+        result
+    )
  
