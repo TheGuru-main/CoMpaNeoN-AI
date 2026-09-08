@@ -1878,7 +1878,7 @@ class FineTunerAndWeightScalar:
                 {},
         }
 
-    # ======================================================================
+# ======================================================================
     # GRID CV VALIDATION
     # ======================================================================
 
@@ -1971,4 +1971,904 @@ class FineTunerAndWeightScalar:
         return {
 
             "available":
-                Tru
+                True,
+
+            "validation_score":
+                DEFAULT_VALIDATION_SCORE,
+
+            "signals":
+                {},
+        }
+
+    # ======================================================================
+    # VALIDATION NORMALIZATION
+    # ======================================================================
+
+    @staticmethod
+    def _normalise_validation(
+        result: Any,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if isinstance(
+            result,
+            dict,
+        ):
+
+            score = (
+
+                result.get(
+                    "validation_score"
+                )
+
+                or result.get(
+                    "score"
+                )
+
+                or result.get(
+                    "confidence"
+                )
+
+                or DEFAULT_VALIDATION_SCORE
+            )
+
+            try:
+
+                score = float(
+                    score
+                )
+
+            except Exception:
+
+                score = (
+                    DEFAULT_VALIDATION_SCORE
+                )
+
+            return {
+
+                "available":
+                    True,
+
+                "validation_score":
+                    max(
+                        0.0,
+                        min(
+                            1.0,
+                            score,
+                        ),
+                    ),
+
+                "signals":
+                    result,
+            }
+
+        if isinstance(
+            result,
+            bool,
+        ):
+
+            return {
+
+                "available":
+                    True,
+
+                "validation_score":
+                    1.0
+                    if result
+                    else 0.0,
+
+                "signals":
+                    {
+                        "valid":
+                            result
+                    },
+            }
+
+        return {
+
+            "available":
+                True,
+
+            "validation_score":
+                DEFAULT_VALIDATION_SCORE,
+
+            "signals":
+                {
+                    "result":
+                        result
+                },
+        }
+
+    # ======================================================================
+    # VALIDATION WEIGHT
+    # ======================================================================
+
+    @staticmethod
+    def validation_weight(
+        validation_score: float,
+    ) -> float:
+
+        validation_score = max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    validation_score
+                ),
+            ),
+        )
+
+        return (
+            0.50
+            + validation_score
+        )
+
+    # ======================================================================
+    # CALCULATE WEIGHTS
+    # ======================================================================
+
+    def calculate_weights(
+        self,
+        language: LanguageProfile,
+        structure: Dict[
+            str,
+            Any,
+        ],
+        domain: DomainProfile,
+        validation: Dict[
+            str,
+            Any,
+        ],
+    ) -> WeightProfile:
+
+        profile = WeightProfile()
+
+        profile.language = (
+            self.language_weight(
+                language
+            )
+        )
+
+        profile.structure = (
+            self.structure_weight(
+                structure
+            )
+        )
+
+        profile.domain = (
+            self.domain_weight(
+                domain
+            )
+        )
+
+        profile.validation = (
+            self.validation_weight(
+
+                validation.get(
+                    "validation_score",
+                    DEFAULT_VALIDATION_SCORE,
+                )
+            )
+        )
+
+        profile.complexity = (
+            self.complexity_weight(
+                structure
+            )
+        )
+
+        profile.final = (
+
+            profile.base
+
+            * profile.language
+
+            * profile.structure
+
+            * profile.domain
+
+            * profile.validation
+
+            * profile.complexity
+        )
+
+        profile.final = max(
+
+            MIN_WEIGHT,
+
+            min(
+                MAX_WEIGHT,
+                profile.final,
+            ),
+        )
+
+        return profile
+
+    # ======================================================================
+    # TRAINING PARAMETERS
+    # ======================================================================
+
+    def build_training_parameters(
+        self,
+        language: LanguageProfile,
+        domain: DomainProfile,
+        structure: Dict[
+            str,
+            Any,
+        ],
+        validation: Dict[
+            str,
+            Any,
+        ],
+        weights: WeightProfile,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        validation_score = float(
+
+            validation.get(
+                "validation_score",
+                DEFAULT_VALIDATION_SCORE,
+            )
+        )
+
+        return {
+
+            "sample_weight":
+                weights.final,
+
+            "base_weight":
+                weights.base,
+
+            "language_weight":
+                weights.language,
+
+            "structure_weight":
+                weights.structure,
+
+            "domain_weight":
+                weights.domain,
+
+            "validation_weight":
+                weights.validation,
+
+            "complexity_weight":
+                weights.complexity,
+
+            "validation_score":
+                validation_score,
+
+            "primary_language":
+                language.primary_language,
+
+            "multilingual":
+                language.multilingual,
+
+            "primary_domain":
+                domain.primary_domain,
+
+            "parent_domain":
+                domain.parent_domain,
+
+            "training_eligible":
+
+                validation_score
+                >= 0.50,
+
+            "structure_type":
+
+                "code"
+
+                if structure.get(
+                    "is_code"
+                )
+
+                else (
+
+                    "mathematical"
+
+                    if structure.get(
+                        "is_mathematical"
+                    )
+
+                    else (
+
+                        "paragraph"
+
+                        if structure.get(
+                            "is_paragraph"
+                        )
+
+                        else "sentence"
+                    )
+                ),
+        }
+
+    # ======================================================================
+    # BUILD LEARNING UNIT
+    # ======================================================================
+
+    def build_learning_unit(
+        self,
+        text: str,
+        lang: Optional[
+            str
+        ] = None,
+        source_type: str = (
+            USER_INPUT_SOURCE
+        ),
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        text = self.normalize_text(
+            text
+        )
+
+        fallback_language = (
+            normalize_lang(
+                lang
+                or DEFAULT_LANGUAGE
+            )
+        )
+
+        language = (
+            self.detect_language_profile(
+                text,
+                fallback=
+                    fallback_language,
+            )
+        )
+
+        tokens = (
+            self.tokenize_text(
+
+                text,
+
+                language.primary_language,
+            )
+        )
+
+        structure = (
+            self.analyse_structure(
+                text,
+                tokens,
+            )
+        )
+
+        domain = (
+            self.classify_domain(
+                text,
+                tokens,
+            )
+        )
+
+        validation = (
+            self.validate_with_grid_cv(
+
+                text,
+
+                language.primary_language,
+
+                domain,
+
+                structure,
+            )
+        )
+
+        weights = (
+            self.calculate_weights(
+
+                language,
+
+                structure,
+
+                domain,
+
+                validation,
+            )
+        )
+
+        training_parameters = (
+            self.build_training_parameters(
+
+                language,
+
+                domain,
+
+                structure,
+
+                validation,
+
+                weights,
+            )
+        )
+
+        return {
+
+            "text":
+                text,
+
+            "source_type":
+                source_type,
+
+            "language": {
+
+                "primary":
+                    language.primary_language,
+
+                "detected":
+                    language.detected_languages,
+
+                "count":
+                    language.language_count,
+
+                "multilingual":
+                    language.multilingual,
+            },
+
+            "tokens":
+                tokens,
+
+            "token_count":
+                len(
+                    tokens
+                ),
+
+            "structure":
+                structure,
+
+            "domain": {
+
+                "primary":
+                    domain.primary_domain,
+
+                "parent":
+                    domain.parent_domain,
+
+                "secondary":
+                    domain.secondary_domains,
+
+                "confidence":
+                    domain.confidence,
+            },
+
+            "matrix":
+                self.matrix_signals(
+
+                    text,
+
+                    language.primary_language,
+
+                    domain,
+                ),
+
+            "symbols":
+                self.symbol_signals(
+                    text
+                ),
+
+            "code":
+                self.code_signals(
+
+                    text,
+
+                    structure,
+                ),
+
+            "grid_cv":
+                validation,
+
+            "weights": {
+
+                "base":
+                    weights.base,
+
+                "language":
+                    weights.language,
+
+                "structure":
+                    weights.structure,
+
+                "domain":
+                    weights.domain,
+
+                "validation":
+                    weights.validation,
+
+                "complexity":
+                    weights.complexity,
+
+                "final":
+                    weights.final,
+            },
+
+            "training_parameters":
+                training_parameters,
+
+            "metadata":
+                metadata
+                or {},
+        }
+
+    # ======================================================================
+    # MEMORY PARTITION ROUTING
+    # ======================================================================
+
+    def _store_via_partition(
+        self,
+        learning_unit: Dict[
+            str,
+            Any,
+        ],
+        source_type: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if (
+            self.partition is None
+        ):
+
+            return {
+
+                "stored":
+                    False,
+
+                "reason":
+                    "memory_partition_unavailable",
+            }
+
+        # --------------------------------------------------------------
+        # Flexible routing API.
+        # --------------------------------------------------------------
+
+        routing_methods = (
+
+            "store_learning_unit",
+
+            "store",
+
+            "partition_and_store",
+
+            "route",
+
+            "add",
+        )
+
+        for name in routing_methods:
+
+            method = getattr(
+                self.partition,
+                name,
+                None,
+            )
+
+            if not callable(
+                method
+            ):
+                continue
+
+            # ----------------------------------------------------------
+            # AI response route
+            # ----------------------------------------------------------
+
+            try:
+
+                result = method(
+
+                    data=
+                        learning_unit,
+
+                    source_type=
+                        source_type,
+
+                    partition_type=
+
+                        "ai_response"
+
+                        if source_type
+                        == AI_RESPONSE_SOURCE
+
+                        else "user_input",
+                )
+
+                return {
+
+                    "stored":
+                        True,
+
+                    "result":
+                        result,
+                }
+
+            except TypeError:
+
+                try:
+
+                    result = method(
+                        learning_unit
+                    )
+
+                    return {
+
+                        "stored":
+                            True,
+
+                        "result":
+                            result,
+                    }
+
+                except Exception:
+                    continue
+
+            except Exception:
+                continue
+
+        return {
+
+            "stored":
+                False,
+
+            "reason":
+                "no_compatible_partition_method",
+        }
+
+    # ======================================================================
+    # MEMORYGRID FALLBACK
+    # ======================================================================
+
+    def _store_in_memory_grid(
+        self,
+        learning_unit: Dict[
+            str,
+            Any,
+        ],
+        source_type: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if not hasattr(
+            self.memory,
+            "add_document",
+        ):
+
+            return {
+
+                "stored":
+                    False,
+
+                "reason":
+                    "memory_grid_add_document_unavailable",
+            }
+
+        text = (
+            learning_unit[
+                "text"
+            ]
+        )
+
+        lang = (
+            learning_unit[
+                "language"
+            ][
+                "primary"
+            ]
+        )
+
+        try:
+
+            document_id = (
+                self.memory.add_document(
+
+                    text=text,
+
+                    lang=lang,
+
+                    source=
+                        source_type,
+                )
+            )
+
+            return {
+
+                "stored":
+                    True,
+
+                "doc_id":
+                    document_id,
+            }
+
+        except Exception as exc:
+
+            return {
+
+                "stored":
+                    False,
+
+                "reason":
+                    str(
+                        exc
+                    ),
+            }
+
+    # ======================================================================
+    # STORE LEARNING UNIT
+    # ======================================================================
+
+    def store_learning_unit(
+        self,
+        learning_unit: Dict[
+            str,
+            Any,
+        ],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        source_type = (
+            learning_unit.get(
+                "source_type"
+            )
+            or USER_INPUT_SOURCE
+        )
+
+        # --------------------------------------------------------------
+        # MemoryPartition remains first authority.
+        # --------------------------------------------------------------
+
+        result = (
+            self._store_via_partition(
+
+                learning_unit,
+
+                source_type,
+            )
+        )
+
+        if result.get(
+            "stored"
+        ):
+
+            return result
+
+        # --------------------------------------------------------------
+        # MemoryGrid fallback.
+        #
+        # This is not a replacement partition architecture.
+        # It preserves ingestion while MemoryPartition APIs evolve.
+        # --------------------------------------------------------------
+
+        return (
+            self._store_in_memory_grid(
+
+                learning_unit,
+
+                source_type,
+            )
+        )
+
+    # ======================================================================
+    # PROCESS LEARNING MATERIAL
+    # ======================================================================
+
+    def process(
+        self,
+        text: str,
+        lang: Optional[
+            str
+        ] = None,
+        source_type: str = (
+            USER_INPUT_SOURCE
+        ),
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+        store: bool = True,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if (
+            len(
+                self.learning_units
+            )
+            >= self.mirror_learning_limit
+        ):
+
+            return {
+
+                "processed":
+                    False,
+
+                "reason":
+                    "mirror_learning_limit_reached",
+
+                "limit":
+                    self.mirror_learning_limit,
+            }
+
+        learning_unit = (
+            self.build_learning_unit(
+
+                text=text,
+
+                lang=lang,
+
+                source_type=
+                    source_type,
+
+                metadata=
+                    metadata,
+            )
+        )
+
+        self.learning_units.append(
+            learning_unit
+        )
+
+        if (
+            source_type
+            == AI_RESPONSE_SOURCE
+        ):
+
+            self.ai_response_units.append(
+                learning_unit
+            )
+
+        else:
+
+            self.user_input_units.append(
+                learning_unit
+            )
+
+        storage = {
+
+            "stored":
+                False
+        }
+
+        if store:
+
+            storage = (
+                self.store_learning_unit(
+                    learning_unit
+                )
+            )
+
+        return {
+
+            "processed":
+                True,
+
+            "learning_unit":
+                learning_unit,
+
+            "storage":
+                storage,
+        }
+
+    # ======================================================================
+    # USER INPUT
+    # ======================================================================
+
+    def process_user_input(
+        self,
+        text: str,
+        lang: Optional[
+            str
+        ] = None,
+        metadata: Optional[
