@@ -987,10 +987,988 @@ class FineTunerAndWeightScalar:
 
         return value.strip()
 
-    # ======================================================================
+# ======================================================================
     # LANGUAGE DETECTION
     # ======================================================================
 
     def detect_language_profile(
         self,
-        text
+        text: str,
+        fallback: str = (
+            DEFAULT_LANGUAGE
+        ),
+    ) -> LanguageProfile:
+
+        text = self.normalize_text(
+            text
+        )
+
+        fallback = normalize_lang(
+            fallback
+        )
+
+        if not text:
+
+            return LanguageProfile(
+                primary_language=fallback
+            )
+
+        if (
+            not LANGDETECT_AVAILABLE
+            or detect is None
+        ):
+
+            return LanguageProfile(
+                primary_language=fallback,
+                detected_languages=[
+                    {
+                        "language": fallback,
+                        "probability": 1.0,
+                    }
+                ],
+            )
+
+        try:
+
+            detected = detect_langs(
+                text
+            )
+
+            languages: List[
+                Dict[str, Any]
+            ] = []
+
+            for item in detected:
+
+                language = normalize_lang(
+                    getattr(
+                        item,
+                        "lang",
+                        fallback,
+                    )
+                )
+
+                probability = float(
+                    getattr(
+                        item,
+                        "prob",
+                        0.0,
+                    )
+                )
+
+                languages.append(
+                    {
+                        "language":
+                            language,
+
+                        "probability":
+                            probability,
+                    }
+                )
+
+            if not languages:
+
+                primary = normalize_lang(
+                    detect(
+                        text
+                    )
+                )
+
+                languages = [
+                    {
+                        "language":
+                            primary,
+
+                        "probability":
+                            1.0,
+                    }
+                ]
+
+            primary_language = (
+                languages[0][
+                    "language"
+                ]
+            )
+
+            meaningful = [
+
+                item
+
+                for item in languages
+
+                if item[
+                    "probability"
+                ] >= 0.05
+
+            ]
+
+            unique_languages = {
+
+                item[
+                    "language"
+                ]
+
+                for item in meaningful
+            }
+
+            return LanguageProfile(
+
+                primary_language=
+                    primary_language,
+
+                detected_languages=
+                    languages,
+
+                language_count=
+                    max(
+                        1,
+                        len(
+                            unique_languages
+                        ),
+                    ),
+
+                multilingual=
+                    len(
+                        unique_languages
+                    ) > 1,
+            )
+
+        except Exception:
+
+            return LanguageProfile(
+                primary_language=fallback,
+                detected_languages=[
+                    {
+                        "language":
+                            fallback,
+
+                        "probability":
+                            1.0,
+                    }
+                ],
+            )
+
+    # ======================================================================
+    # TOKENIZATION
+    # ======================================================================
+
+    def tokenize_text(
+        self,
+        text: str,
+        lang: str,
+    ) -> List[Any]:
+
+        try:
+
+            return list(
+                tokenize(
+                    text,
+                    lang,
+                )
+            )
+
+        except Exception:
+
+            return re.findall(
+                r"\w+|[^\w\s]",
+                text,
+                flags=re.UNICODE,
+            )
+
+    # ======================================================================
+    # STRUCTURE ANALYSIS
+    # ======================================================================
+
+    def analyse_structure(
+        self,
+        text: str,
+        tokens: List[Any],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        text = self.normalize_text(
+            text
+        )
+
+        token_count = len(
+            tokens
+        )
+
+        sentence_count = len(
+            [
+                value
+
+                for value in re.split(
+                    r"[.!?]+",
+                    text,
+                )
+
+                if value.strip()
+            ]
+        )
+
+        paragraph_count = len(
+            [
+                value
+
+                for value in re.split(
+                    r"\n\s*\n",
+                    text,
+                )
+
+                if value.strip()
+            ]
+        )
+
+        code_like = bool(
+
+            re.search(
+                r"("
+                r"\bdef\s+"
+                r"|"
+                r"\bclass\s+"
+                r"|"
+                r"\bfunction\s+"
+                r"|"
+                r"\bimport\s+"
+                r"|"
+                r"\breturn\b"
+                r"|"
+                r"[{};]"
+                r")",
+                text,
+            )
+        )
+
+        mathematical = bool(
+
+            re.search(
+                r"("
+                r"\d+\s*[+\-*/=^]\s*\d+"
+                r"|"
+                r"[∑∫√∞≈≠≤≥]"
+                r")",
+                text,
+            )
+        )
+
+        symbolic = bool(
+
+            re.search(
+                r"[^\w\s.,!?;:'\"()-]",
+                text,
+            )
+        )
+
+        conversation = (
+            text.count(
+                "?"
+            )
+            > 0
+            or bool(
+                re.search(
+                    r"\b("
+                    r"hello"
+                    r"|hi"
+                    r"|hey"
+                    r"|you"
+                    r"|i"
+                    r"|we"
+                    r")\b",
+                    text,
+                    flags=re.I,
+                )
+            )
+        )
+
+        return {
+
+            "sentence_count":
+                sentence_count,
+
+            "paragraph_count":
+                max(
+                    1,
+                    paragraph_count,
+                ),
+
+            "token_count":
+                token_count,
+
+            "character_count":
+                len(
+                    text
+                ),
+
+            "is_sentence":
+                sentence_count == 1,
+
+            "is_paragraph":
+                (
+                    paragraph_count > 1
+                    or sentence_count > 1
+                ),
+
+            "is_code":
+                code_like,
+
+            "is_mathematical":
+                mathematical,
+
+            "is_symbolic":
+                symbolic,
+
+            "is_conversation":
+                conversation,
+        }
+
+    # ======================================================================
+    # DOMAIN DETECTION
+    # ======================================================================
+
+    def classify_domain(
+        self,
+        text: str,
+        tokens: Optional[
+            List[Any]
+        ] = None,
+    ) -> DomainProfile:
+
+        text = self.normalize_text(
+            text
+        )
+
+        lowered = text.lower()
+
+        token_set = set()
+
+        if tokens:
+
+            token_set = {
+
+                str(
+                    token
+                ).lower()
+
+                for token in tokens
+            }
+
+        scores: Dict[
+            str,
+            float,
+        ] = {}
+
+        for domain, signals in (
+            DOMAIN_SIGNALS.items()
+        ):
+
+            score = 0.0
+
+            for signal in signals:
+
+                if (
+                    signal
+                    in token_set
+                ):
+
+                    score += 1.0
+
+                    continue
+
+                if (
+                    re.search(
+                        r"\b"
+                        + re.escape(
+                            signal
+                        )
+                        + r"\b",
+                        lowered,
+                    )
+                ):
+
+                    score += 1.0
+
+            scores[
+                domain
+            ] = score
+
+        # --------------------------------------------------------------
+        # Code structural signals
+        # --------------------------------------------------------------
+
+        if re.search(
+            r"\b("
+            r"def"
+            r"|class"
+            r"|function"
+            r"|import"
+            r"|return"
+            r"|async"
+            r"|await"
+            r")\b",
+            lowered,
+        ):
+
+            scores[
+                DOMAIN_CODING
+            ] = (
+                scores.get(
+                    DOMAIN_CODING,
+                    0.0,
+                )
+                + 3.0
+            )
+
+        # --------------------------------------------------------------
+        # Default domain
+        # --------------------------------------------------------------
+
+        ranked = sorted(
+
+            scores.items(),
+
+            key=lambda item:
+                item[1],
+
+            reverse=True,
+        )
+
+        if (
+            not ranked
+            or ranked[0][1] <= 0
+        ):
+
+            primary = (
+                DOMAIN_GENERAL_LANGUAGE
+            )
+
+            return DomainProfile(
+
+                primary_domain=
+                    primary,
+
+                parent_domain=
+                    DOMAIN_PARENTS[
+                        primary
+                    ],
+
+                confidence=
+                    0.0,
+            )
+
+        primary, primary_score = (
+            ranked[0]
+        )
+
+        total_score = sum(
+            value
+
+            for _, value in ranked
+
+            if value > 0
+        )
+
+        confidence = (
+
+            primary_score
+            / total_score
+
+            if total_score > 0
+
+            else 0.0
+        )
+
+        secondary = []
+
+        for domain, score in ranked[
+            1:
+        ]:
+
+            if score <= 0:
+                continue
+
+            secondary.append(
+                {
+                    "domain":
+                        domain,
+
+                    "parent_domain":
+                        DOMAIN_PARENTS.get(
+                            domain,
+                            "knowledge",
+                        ),
+
+                    "score":
+                        score,
+
+                    "relative_confidence":
+                        (
+                            score
+                            / total_score
+                        ),
+                }
+            )
+
+        return DomainProfile(
+
+            primary_domain=
+                primary,
+
+            parent_domain=
+                DOMAIN_PARENTS.get(
+                    primary,
+                    "knowledge",
+                ),
+
+            secondary_domains=
+                secondary,
+
+            confidence=
+                confidence,
+        )
+
+    # ======================================================================
+    # LANGUAGE WEIGHT
+    # ======================================================================
+
+    def language_weight(
+        self,
+        profile: LanguageProfile,
+    ) -> float:
+
+        if (
+            profile.multilingual
+        ):
+
+            return min(
+                1.0
+                + (
+                    0.10
+                    * (
+                        profile.language_count
+                        - 1
+                    )
+                ),
+                1.50,
+            )
+
+        return 1.0
+
+    # ======================================================================
+    # STRUCTURE WEIGHT
+    # ======================================================================
+
+    def structure_weight(
+        self,
+        structure: Dict[
+            str,
+            Any,
+        ],
+    ) -> float:
+
+        weight = 1.0
+
+        if structure.get(
+            "is_paragraph"
+        ):
+
+            weight += 0.10
+
+        if structure.get(
+            "is_mathematical"
+        ):
+
+            weight += 0.15
+
+        if structure.get(
+            "is_symbolic"
+        ):
+
+            weight += 0.10
+
+        if structure.get(
+            "is_code"
+        ):
+
+            weight += 0.20
+
+        return min(
+            weight,
+            2.0,
+        )
+
+    # ======================================================================
+    # DOMAIN WEIGHT
+    # ======================================================================
+
+    def domain_weight(
+        self,
+        profile: DomainProfile,
+    ) -> float:
+
+        return DOMAIN_WEIGHTS.get(
+
+            profile.primary_domain,
+
+            1.0,
+        )
+
+    # ======================================================================
+    # COMPLEXITY WEIGHT
+    # ======================================================================
+
+    def complexity_weight(
+        self,
+        structure: Dict[
+            str,
+            Any,
+        ],
+    ) -> float:
+
+        token_count = int(
+            structure.get(
+                "token_count",
+                0,
+            )
+        )
+
+        if token_count <= 5:
+
+            return 0.95
+
+        if token_count <= 20:
+
+            return 1.0
+
+        if token_count <= 80:
+
+            return 1.10
+
+        if token_count <= 250:
+
+            return 1.20
+
+        return 1.30
+
+    # ======================================================================
+    # SYMBOL SIGNALS
+    # ======================================================================
+
+    def symbol_signals(
+        self,
+        text: str,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if (
+            symbols_module is None
+        ):
+
+            return {
+
+                "available":
+                    False,
+
+                "signals":
+                    {},
+            }
+
+        # --------------------------------------------------------------
+        # Flexible module API.
+        # --------------------------------------------------------------
+
+        for name in (
+            "analyse",
+            "analyze",
+            "extract",
+            "process",
+        ):
+
+            function = getattr(
+                symbols_module,
+                name,
+                None,
+            )
+
+            if callable(
+                function
+            ):
+
+                try:
+
+                    result = function(
+                        text
+                    )
+
+                    return {
+
+                        "available":
+                            True,
+
+                        "signals":
+                            result,
+                    }
+
+                except Exception:
+                    pass
+
+        return {
+
+            "available":
+                True,
+
+            "signals":
+                {},
+        }
+
+    # ======================================================================
+    # MATRIX SIGNALS
+    # ======================================================================
+
+    def matrix_signals(
+        self,
+        text: str,
+        lang: str,
+        domain: DomainProfile,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if (
+            self.matrix_maths
+            is None
+        ):
+
+            return {}
+
+        for name in (
+            "analyse",
+            "analyze",
+            "process",
+            "calculate",
+            "signals",
+        ):
+
+            method = getattr(
+                self.matrix_maths,
+                name,
+                None,
+            )
+
+            if not callable(
+                method
+            ):
+                continue
+
+            try:
+
+                return method(
+                    text=text,
+                    lang=lang,
+                    domain=(
+                        domain.primary_domain
+                    ),
+                )
+
+            except TypeError:
+
+                try:
+
+                    return method(
+                        text
+                    )
+
+                except Exception:
+                    continue
+
+            except Exception:
+                continue
+
+        return {}
+
+    # ======================================================================
+    # CODE MIXER SIGNALS
+    # ======================================================================
+
+    def code_signals(
+        self,
+        text: str,
+        structure: Dict[
+            str,
+            Any,
+        ],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if not structure.get(
+            "is_code"
+        ):
+
+            return {
+
+                "is_code":
+                    False,
+
+                "signals":
+                    {},
+            }
+
+        mixer = (
+            self.code_mixer
+            or self.data_mixer
+        )
+
+        if mixer is None:
+
+            return {
+
+                "is_code":
+                    True,
+
+                "signals":
+                    {},
+            }
+
+        for name in (
+            "analyse",
+            "analyze",
+            "mix",
+            "process",
+        ):
+
+            method = getattr(
+                mixer,
+                name,
+                None,
+            )
+
+            if callable(
+                method
+            ):
+
+                try:
+
+                    return {
+
+                        "is_code":
+                            True,
+
+                        "signals":
+                            method(
+                                text
+                            ),
+                    }
+
+                except Exception:
+                    continue
+
+        return {
+
+            "is_code":
+                True,
+
+            "signals":
+                {},
+        }
+
+    # ======================================================================
+    # GRID CV VALIDATION
+    # ======================================================================
+
+    def validate_with_grid_cv(
+        self,
+        text: str,
+        lang: str,
+        domain: DomainProfile,
+        structure: Dict[
+            str,
+            Any,
+        ],
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        if (
+            self.grid_cv is None
+        ):
+
+            return {
+
+                "available":
+                    False,
+
+                "validation_score":
+                    DEFAULT_VALIDATION_SCORE,
+
+                "signals":
+                    {},
+            }
+
+        for name in (
+            "validate",
+            "analyse",
+            "analyze",
+            "evaluate",
+            "compare",
+        ):
+
+            method = getattr(
+                self.grid_cv,
+                name,
+                None,
+            )
+
+            if not callable(
+                method
+            ):
+                continue
+
+            try:
+
+                result = method(
+
+                    text=text,
+
+                    lang=lang,
+
+                    domain=(
+                        domain.primary_domain
+                    ),
+
+                    structure=structure,
+                )
+
+                return self._normalise_validation(
+                    result
+                )
+
+            except TypeError:
+
+                try:
+
+                    result = method(
+                        text
+                    )
+
+                    return self._normalise_validation(
+                        result
+                    )
+
+                except Exception:
+                    continue
+
+            except Exception:
+                continue
+
+        return {
+
+            "available":
+                Tru
