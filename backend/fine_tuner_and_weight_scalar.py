@@ -2872,3 +2872,428 @@ class FineTunerAndWeightScalar:
             str
         ] = None,
         metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+        store: bool = True,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        return self.process(
+
+            text=text,
+
+            lang=lang,
+
+            source_type=
+                USER_INPUT_SOURCE,
+
+            metadata=
+                metadata,
+
+            store=store,
+        )
+
+    # ======================================================================
+    # AI RESPONSE
+    # ======================================================================
+
+    def process_ai_response(
+        self,
+        response_text: str,
+        lang: Optional[
+            str
+        ] = None,
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None,
+        store: bool = True,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+        """
+        Process an AI-generated response.
+
+        FLOW
+        ----
+
+            AI Response
+                ↓
+            GridCV
+                ↓
+            FineTuner weights
+                ↓
+            Training parameters
+                ↓
+            MemoryPartition
+                ↓
+            AI Response Partition
+                ↓
+            MemoryGrid
+
+        AI-generated responses remain distinct from user input.
+        """
+
+        metadata = dict(
+            metadata
+            or {}
+        )
+
+        metadata.setdefault(
+
+            "memory_origin",
+
+            "ai_generated",
+        )
+
+        metadata.setdefault(
+
+            "training_state",
+
+            "generated",
+        )
+
+        return self.process(
+
+            text=response_text,
+
+            lang=lang,
+
+            source_type=
+                AI_RESPONSE_SOURCE,
+
+            metadata=
+                metadata,
+
+            store=store,
+        )
+
+    # ======================================================================
+    # BATCH PROCESS
+    # ======================================================================
+
+    def process_many(
+        self,
+        texts: Iterable[
+            str
+        ],
+        lang: Optional[
+            str
+        ] = None,
+        source_type: str = (
+            USER_INPUT_SOURCE
+        ),
+        store: bool = True,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+
+        results = []
+
+        for text in texts:
+
+            if (
+                len(
+                    self.learning_units
+                )
+                >= self.mirror_learning_limit
+            ):
+
+                break
+
+            results.append(
+
+                self.process(
+
+                    text=text,
+
+                    lang=lang,
+
+                    source_type=
+                        source_type,
+
+                    store=store,
+                )
+            )
+
+        return results
+
+    # ======================================================================
+    # AI RESPONSE TRAINING DATA
+    # ======================================================================
+
+    def training_eligible_ai_responses(
+        self,
+    ) -> List[
+        Dict[str, Any]
+    ]:
+        """
+        Return AI responses that passed the basic FineTuner
+        training eligibility threshold.
+
+        train.py and background_training.py can consume this through
+        their own training pipelines.
+        """
+
+        results = []
+
+        for unit in (
+            self.ai_response_units
+        ):
+
+            parameters = (
+                unit.get(
+                    "training_parameters",
+                    {},
+                )
+            )
+
+            if not parameters.get(
+                "training_eligible",
+                False,
+            ):
+
+                continue
+
+            results.append(
+                unit
+            )
+
+        return results
+
+    # ======================================================================
+    # STATISTICS
+    # ======================================================================
+
+    def stats(
+        self,
+    ) -> Dict[
+        str,
+        Any,
+    ]:
+
+        domain_counts: Dict[
+            str,
+            int,
+        ] = {}
+
+        language_counts: Dict[
+            str,
+            int,
+        ] = {}
+
+        for unit in (
+            self.learning_units
+        ):
+
+            domain = (
+                unit.get(
+                    "domain",
+                    {}
+                ).get(
+                    "primary"
+                )
+            )
+
+            if domain:
+
+                domain_counts[
+                    domain
+                ] = (
+
+                    domain_counts.get(
+                        domain,
+                        0,
+                    )
+                    + 1
+                )
+
+            language = (
+                unit.get(
+                    "language",
+                    {}
+                ).get(
+                    "primary"
+                )
+            )
+
+            if language:
+
+                language_counts[
+                    language
+                ] = (
+
+                    language_counts.get(
+                        language,
+                        0,
+                    )
+                    + 1
+                )
+
+        return {
+
+            "mirror_learning_limit":
+                self.mirror_learning_limit,
+
+            "learning_units":
+                len(
+                    self.learning_units
+                ),
+
+            "user_input_units":
+                len(
+                    self.user_input_units
+                ),
+
+            "ai_response_units":
+                len(
+                    self.ai_response_units
+                ),
+
+            "training_eligible_ai_responses":
+                len(
+                    self.training_eligible_ai_responses()
+                ),
+
+            "domains":
+                domain_counts,
+
+            "languages":
+                language_counts,
+
+            "langdetect_available":
+                LANGDETECT_AVAILABLE,
+
+            "grid_cv_available":
+                self.grid_cv
+                is not None,
+
+            "matrix_maths_available":
+                self.matrix_maths
+                is not None,
+
+            "code_mixer_available":
+                self.code_mixer
+                is not None,
+
+            "data_mixer_available":
+                self.data_mixer
+                is not None,
+
+            "memory_partition_available":
+                self.partition
+                is not None,
+        }
+
+
+# ============================================================================
+# FUNCTIONAL API
+# ============================================================================
+
+def fine_tune(
+    memory_grid: Any,
+    text: str,
+    lang: Optional[
+        str
+    ] = None,
+    memory_partition: Optional[
+        Any
+    ] = None,
+    source_type: str = (
+        USER_INPUT_SOURCE
+    ),
+    store: bool = True,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    fine_tuner = (
+        FineTunerAndWeightScalar(
+
+            memory_grid=
+                memory_grid,
+
+            memory_partition=
+                memory_partition,
+        )
+    )
+
+    return fine_tuner.process(
+
+        text=text,
+
+        lang=lang,
+
+        source_type=
+            source_type,
+
+        store=store,
+    )
+
+
+def fine_tune_ai_response(
+    memory_grid: Any,
+    response_text: str,
+    lang: Optional[
+        str
+    ] = None,
+    memory_partition: Optional[
+        Any
+    ] = None,
+    store: bool = True,
+) -> Dict[
+    str,
+    Any,
+]:
+
+    fine_tuner = (
+        FineTunerAndWeightScalar(
+
+            memory_grid=
+                memory_grid,
+
+            memory_partition=
+                memory_partition,
+        )
+    )
+
+    return (
+        fine_tuner.process_ai_response(
+
+            response_text=
+                response_text,
+
+            lang=lang,
+
+            store=store,
+        )
+    )
+
+
+# ============================================================================
+# DEVELOPMENT TEST
+# ============================================================================
+
+if __name__ == "__main__":
+
+    print(
+        "CoMpaNeoN FineTunerAndWeightScalar"
+    )
+
+    print(
+        {
+            "mirror_learning_limit":
+                MIRROR_LEARNING_LIMIT,
+
+            "langdetect_available":
+                LANGDETECT_AVAILABLE,
+
+            "domains":
+                sorted(
+                    DOMAIN_WEIGHTS.keys()
+                ),
+        }
+    )
