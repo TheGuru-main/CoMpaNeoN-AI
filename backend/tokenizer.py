@@ -2,120 +2,186 @@
 CoMpaNeoN Tokenizer
 ===================
 
-Multilingual tokenizer and alphabet-grid foundation.
+Multilingual lexical tokenizer and deterministic identity foundation.
 
-Responsibilities:
-- Language normalization.
-- Multilingual alphabet definitions.
-- Multilingual keyboard/input key lines.
-- Letter-grid indexing (A × 1).
-- Word-grid indexing (row % 26; col = c).
-- Stem prefixes/affixes.
-- Accent/code-mix bridging.
-- Global symbols board.
-- Deterministic token construction.
-- Lexical letter scoring.
-- Lexical word scoring.
+The tokenizer is responsible for:
 
-IMPORTANT
----------
+- language normalization
+- multilingual character/alphabet handling
+- multilingual keyboard/input metadata
+- Unicode-safe tokenization
+- lexical normalization
+- character decomposition
+- 0-based alphabet indexing
+- ordered lexical UID generation
+- lexical UID serialization
+- lexical UID S calculation
+- L / S / SC generation
+- 46 × 26 word-grid placement inputs
+- letter-grid indexing
+- symbol recognition
+- lightweight stem metadata
+- lexical similarity signals
+- compatibility helpers used by existing CoMpaNeoN modules
+
 The tokenizer does NOT own:
 
-    GSP storage placement
-    GSP XOR sharding
-    MemoryGrid storage
-    Full-text K replication
-    Ranking
-    WordChain
-    Follow-up generation
-    Prompt management
-    AI response generation
+- GSP crawler traversal
+- GSP K traversal
+- GSP forward/backward jumps
+- XOR sharding
+- quorum routing
+- MemoryGrid storage
+- full-text placement
+- full-text UID chaining
+- ranking policy
+- WordChain
+- WordUnderstanding
+- POS analysis
+- linguistic analysis
+- semantic analysis
+- dictionary enrichment
+- prompt management
+- AI response generation
 
-GSP keyboard calculations are delegated to keyboard.py when present.
+IMPORTANT IDENTITY RULE
+-----------------------
 
-GRID RULES
-----------
-Letter Grid:
-    Shape: A × 1  (A = len(alphabet), height R = 1 → row always 0)
-    Column = alphabet index (NOT index % 1)
+Alphabet indexes are ZERO-BASED.
 
-Word Grid:
-    Linguistic metadata: A × A
-    Row reduction: R = 26
-    row = (L + L) % 26
-    col = c
+English:
 
-FIRST LETTER c
---------------
-    c = first_letter_index
+    A = 0
+    B = 1
+    ...
+    Z = 25
 
-c is CONSTANT for the token.
-It is NOT:
-    c % A
-    c % 26
-    derived from word-row math
+Example:
 
-K
--
-K is NOT applied here.
-K belongs to full-text placement and MemoryGrid.
+    ZED -> [25, 4, 3]
+    ZEE -> [25, 4, 4]
+
+The ordered UID sequence is preserved.
+
+Serialized UID:
+
+    ZED -> "2543"
+    ZEE -> "2544"
+
+S is NOT the digit sum of the serialized UID.
+
+Instead:
+
+    S = sum(uid_sequence)
+
+Therefore:
+
+    ZED -> 25 + 4 + 3 = 32
+    ZEE -> 25 + 4 + 4 = 33
+
+WORD GRID
+---------
+
+The word grid remains:
+
+    46 columns × 26 rows
+
+Word placement uses:
+
+    row = ((L + S - 1) % 26) + 1
+
+where:
+
+    L = normalized lexical token length
+    S = sum(uid_sequence)
+
+SC is:
+
+    SC = first-letter alphabet index
+
+SC is NOT a random value and is NOT derived from word-row math.
+
+FULL TEXT
+---------
+
+The tokenizer preserves each word's ordered UID sequence.
+
+The full-text placement layer may then use those UID sequences for
+column-index chaining and calculate the total/full-text UID and S.
+
+The tokenizer does not perform full-text placement.
 
 GSP START ROW
 -------------
-Canonical formula (delegated / mirrored):
 
-    start_row = ((Lsum + Ssum - 1) % R) + 1
+Lexical UID identity is separate from the GSP keyboard-placement
+authority.
 
-PERTURBATION
-------------
-Full-text perturbation belongs to the GSP/MemoryGrid layer.
+When a GSP start row is requested, this module delegates to keyboard.py
+when available.
 
-    forward_d  = 5
-    backward_d = 1
-
-The tokenizer does not apply these perturbations.
+The tokenizer does not apply crawler K/D traversal.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any
+import unicodedata
+from typing import Any, Iterable
+
+
+# ---------------------------------------------------------------------
+# Optional GSP keyboard companion
+# ---------------------------------------------------------------------
 
 try:
-    import keyboard  # Companion GSP keyboard module (optional)
+    import keyboard  # type: ignore
 except ImportError:
     keyboard = None
 
 
 # =====================================================================
-# MULTILINGUAL KEY MAPPINGS
+# MULTILINGUAL KEY LINES
 # =====================================================================
 
 EN_KEY_LINE = "QWERTYUIOPASDFGHJKLZXCVBNM"
 FR_KEY_LINE = "AZERTYUIOPQSDFGHJKLMWXCVBN"
 DE_KEY_LINE = "QWERTZUIOPASDFGHJKLYXCVBNM"
+
 AR_KEY_LINE = "ضصثقفغعهخحجدشسيبلاتنمكطئءؤرلاىةوزظ"
 HE_KEY_LINE = "קראטוןםפשדגכעיחלךףזסבהנמצתץ"
 EL_KEY_LINE = ";ςερτυθιοπασδφγηξκλζχψωβνμ"
 RU_KEY_LINE = "йцукенгшщзхъфывапролджэячсмитьбю"
 UK_KEY_LINE = "йцукенгшщзхїфівапролдэжячсмитьбю"
+
 HI_KEY_LINE = "कखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसह"
 BN_KEY_LINE = "কখগঘঙচছজঝঞটঠডঢণতথদধনপফবভমযরলশষসহ"
+
 JA_HIRAGANA_KEY_LINE = (
-    "あいうえおかきくけこさしすせそ"
-    "たちつてとなにぬねのはひふへほ"
-    "まみむめもやゆよらりるれろわをん"
+    "あいうえお"
+    "かきくけこ"
+    "さしすせそ"
+    "たちつてと"
+    "なにぬねの"
+    "はひふへほ"
+    "まみむめも"
+    "やゆよ"
+    "らりるれろ"
+    "わをん"
 )
+
 KO_HANGUL_KEY_LINE = (
     "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ"
     "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ"
     "ㅋㅌㅊㅍㅠㅜㅡ"
 )
+
 ZH_PINYIN_KEY_LINE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 TR_KEY_LINE = "QWERTYUIOPĞÜASDFGHJKLŞİZXCVBNMÖÇ"
 ES_KEY_LINE = "QWERTYUIOPASDFGHJKLÑZXCVBNM"
 IT_KEY_LINE = "QWERTYUIOPÈASDFGHJKLÒÀZXCVBNM"
-PT_KEY_LINE = "QWERTYUIOP´ASDFGHJKLÇ\~ZXCVBNM"
+PT_KEY_LINE = "QWERTYUIOP´ASDFGHJKLÇ~ZXCVBNM"
 NL_KEY_LINE = "QWERTYUIOPASDFGHJKLZXCVBNM"
 PL_KEY_LINE = "QWERTYUIOPĄASDFGHJKLŚZXCVBNMĘ"
 CS_KEY_LINE = "QWERTZUIOPÚASDFGHJKLÝZXCVBNM"
@@ -124,10 +190,12 @@ NO_KEY_LINE = "QWERTYUIOPÅASDFGHJKLØZXCVBNM"
 DA_KEY_LINE = "QWERTYUIOPÅASDFGHJKLÆZXCVBNM"
 FI_KEY_LINE = "QWERTYUIOPÅASDFGHJKLÖZXCVBNM"
 VI_KEY_LINE = "QWERTYUIOPASDFGHJKLZXCVBNMĐ"
+
 TH_KEY_LINE = (
     "กขคฆงจฉชซฌญฎฏฐฑฒณดตถทธน"
     "บปผฝพฟภมยรฤลฦวศษสหฬอฮ"
 )
+
 
 KEY_LINES: dict[str, str] = {
     "en": EN_KEY_LINE,
@@ -165,36 +233,46 @@ KEY_LINES: dict[str, str] = {
 
 ALPHABETS: dict[str, str] = {
     "en": "abcdefghijklmnopqrstuvwxyz",
+
     "fr": "abcdefghijklmnopqrstuvwxyzàâäæçéèêëïîôœùûüÿ",
     "de": "abcdefghijklmnopqrstuvwxyzäöüß",
     "es": "abcdefghijklmnopqrstuvwxyzáéíóúüñ",
     "pt": "abcdefghijklmnopqrstuvwxyzáàâãéêíóôõúç",
+
     "ar": "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئىة",
+
     "zh": "abcdefghijklmnopqrstuvwxyz",
+
     "hi": (
         "अआइईउऊऋएऐओऔ"
-        "कखगघचछजझटठडढण"
+        "कखगघङचछजझञटठडढण"
         "तथदधनपफबभम"
         "यरलवशषसह"
         "क्षज्ञ"
     ),
+
     "yo": "abcdefghijklmnopqrstuvwxyzáàéèẹíìóòọúùṣń",
     "ha": "abcdefghijklmnopqrstuvwxyzɓɗƙƴ",
     "ig": "abcdefghijklmnopqrstuvwxyzịñọụ",
     "sw": "abcdefghijklmnopqrstuvwxyz",
+
     "tr": "abcçdefgğhıijklmnoöprsştuüvyz",
     "id": "abcdefghijklmnopqrstuvwxyz",
     "it": "abcdefghijklmnopqrstuvwxyzàèéìíîòóùú",
+
     "he": "אבגדהוזחטיכלמנסעפצקרשתךםןףץ",
     "el": "αβγδεζηθικλμνξοπρστυφχψω",
+
     "ru": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
     "uk": "абвгдеєжзиіїйклмнопрстуфхцчшщьюя",
+
     "bn": (
         "অআইঈউঊঋএঐওঔ"
         "কখগঘঙচছজঝঞ"
         "টঠডঢণতথদধন"
         "পফবভমযরলশষসহ"
     ),
+
     "ja": (
         "あいうえお"
         "かきくけこ"
@@ -207,16 +285,20 @@ ALPHABETS: dict[str, str] = {
         "らりるれろ"
         "わをん"
     ),
+
     "ko": (
         "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ"
         "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ"
         "ㅋㅌㅊㅍㅠㅜㅡ"
     ),
+
     "th": (
         "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธน"
         "บปผฝพฟภมยรลวศษสหฬอฮ"
     ),
+
     "vi": "abcdefghijklmnopqrstuvwxyzăâđêôơư",
+
     "nl": "abcdefghijklmnopqrstuvwxyz",
     "pl": "aąbcćdeęfghijklłmnńoóprsśtuwyzźż",
     "cs": "aábcčdďeéfghiíjklmnoópqrřsštťuúůvwxyýzž",
@@ -226,15 +308,15 @@ ALPHABETS: dict[str, str] = {
     "fi": "abcdefghijklmnopqrstuvwxyzåäö",
 }
 
-ALPHABETS["default"] = "abcdefghijklmnopqrstuvwxyz"
-KEY_LINES["default"] = EN_KEY_LINE
+ALPHABETS["default"] = ALPHABETS["en"]
+KEY_LINES["default"] = KEY_LINES["en"]
 
 
 # =====================================================================
 # LANGUAGE ALIASES
 # =====================================================================
 
-LANG_ALIASES = {
+LANG_ALIASES: dict[str, str] = {
     "eng": "en",
     "fra": "fr",
     "fre": "fr",
@@ -245,6 +327,7 @@ LANG_ALIASES = {
     "ara": "ar",
     "zho": "zh",
     "cmn": "zh",
+    "mandarin": "zh",
     "hin": "hi",
     "yor": "yo",
     "hau": "ha",
@@ -282,15 +365,23 @@ LANG_ALIASES = {
 # GRID CONSTANTS
 # =====================================================================
 
-LETTER_GRID_R = 1   # height of letter grid (A × 1); row is always 0
-WORD_GRID_R = 26    # word-row reduction for every language
+# Letter grid is one row.
+LETTER_GRID_R = 1
 
+# Word placement is always reduced against 26 rows.
+WORD_GRID_R = 26
+
+# The physical word grid is 46 columns × 26 rows.
+WORD_GRID_COLUMNS = 46
+WORD_GRID_ROWS = 26
+
+# These remain metadata only.
 FORWARD_D = 5
 BACKWARD_D = 1
 
 
 # =====================================================================
-# STEM PREFIXES / SUFFIXES
+# STEM METADATA
 # =====================================================================
 
 PREFIXES = (
@@ -326,88 +417,294 @@ SUFFIXES = (
 
 
 # =====================================================================
-# ACCENT / CHARACTER FOLD
+# CHARACTER FOLDING
 # =====================================================================
 
-_FOLD = str.maketrans({
-    "à": "a", "á": "a", "â": "a", "ä": "a", "ã": "a", "æ": "ae",
-    "ç": "c",
-    "è": "e", "é": "e", "ê": "e", "ë": "e",
-    "ì": "i", "í": "i", "î": "i", "ï": "i", "ı": "i",
-    "ò": "o", "ó": "o", "ô": "o", "ö": "o", "õ": "o", "œ": "oe",
-    "ù": "u", "ú": "u", "û": "u", "ü": "u",
-    "ÿ": "y", "ñ": "n",
-    "ş": "s", "ṣ": "s",
-    "ğ": "g",
-    "ß": "ss",
-    "ẹ": "e", "ọ": "o", "ị": "i", "ụ": "u",
-    "ń": "n",
-    "ɓ": "b", "ɗ": "d", "ƙ": "k", "ƴ": "y",
-    "đ": "d",
-    "ơ": "o", "ư": "u", "ă": "a",
-})
+_FOLD = str.maketrans(
+    {
+        "à": "a",
+        "á": "a",
+        "â": "a",
+        "ä": "a",
+        "ã": "a",
+        "å": "a",
+        "æ": "ae",
+        "ç": "c",
+
+        "è": "e",
+        "é": "e",
+        "ê": "e",
+        "ë": "e",
+
+        "ì": "i",
+        "í": "i",
+        "î": "i",
+        "ï": "i",
+        "ı": "i",
+
+        "ò": "o",
+        "ó": "o",
+        "ô": "o",
+        "ö": "o",
+        "õ": "o",
+        "œ": "oe",
+
+        "ù": "u",
+        "ú": "u",
+        "û": "u",
+        "ü": "u",
+
+        "ÿ": "y",
+        "ñ": "n",
+
+        "ş": "s",
+        "ṣ": "s",
+        "ğ": "g",
+        "ß": "ss",
+
+        "ẹ": "e",
+        "ọ": "o",
+        "ị": "i",
+        "ụ": "u",
+        "ń": "n",
+
+        "ɓ": "b",
+        "ɗ": "d",
+        "ƙ": "k",
+        "ƴ": "y",
+
+        "đ": "d",
+        "ơ": "o",
+        "ư": "u",
+        "ă": "a",
+    }
+)
 
 
 # =====================================================================
-# GLOBAL SYMBOLS BOARD
+# GLOBAL SYMBOL BOARD
 # =====================================================================
 
 GLOBAL_SYMBOLS_BOARD: dict[str, tuple[str, ...]] = {
     "punctuation": (
-        ".", ",", ";", ":", "!", "?", "¿", "¡",
-        "'", '"', "`", "´", "’", "‘", "“", "”",
-        "…", "-", "–", "—", "_",
+        ".",
+        ",",
+        ";",
+        ":",
+        "!",
+        "?",
+        "¿",
+        "¡",
+        "'",
+        '"',
+        "`",
+        "´",
+        "’",
+        "‘",
+        "“",
+        "”",
+        "…",
+        "-",
+        "–",
+        "—",
+        "_",
     ),
+
     "mathematical": (
-        "+", "-", "*", "/", "%", "=", "<", ">",
-        "≤", "≥", "≠", "≈", "≡", "×", "÷", "±", "√", "∞", "^", "|",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "=",
+        "<",
+        ">",
+        "≤",
+        "≥",
+        "≠",
+        "≈",
+        "≡",
+        "×",
+        "÷",
+        "±",
+        "√",
+        "∞",
+        "^",
+        "|",
     ),
+
     "programming": (
-        "#", "@", "$", "&", "\~", "^", "*", "/", "\\", "%",
-        "!", "?", ":", ";", ".", ",",
-        "(", ")", "[", "]", "{", "}", "<", ">", "=", "_", "`",
+        "#",
+        "@",
+        "$",
+        "&",
+        "~",
+        "^",
+        "*",
+        "/",
+        "\\",
+        "%",
+        "!",
+        "?",
+        ":",
+        ";",
+        ".",
+        ",",
+        "(",
+        ")",
+        "[",
+        "]",
+        "{",
+        "}",
+        "<",
+        ">",
+        "=",
+        "_",
+        "`",
     ),
+
     "structure": (
-        "(", ")", "[", "]", "{", "}", "<", ">",
-        "/", "\\", "|", ":", ";", ",", ".",
+        "(",
+        ")",
+        "[",
+        "]",
+        "{",
+        "}",
+        "<",
+        ">",
+        "/",
+        "\\",
+        "|",
+        ":",
+        ";",
+        ",",
+        ".",
     ),
+
     "currency": (
-        "$", "€", "£", "₦", "¥", "₹", "₽", "₩", "₺", "₴", "₫", "₵", "₡", "₱",
+        "$",
+        "€",
+        "£",
+        "₦",
+        "¥",
+        "₹",
+        "₽",
+        "₩",
+        "₺",
+        "₴",
+        "₫",
+        "₵",
+        "₡",
+        "₱",
     ),
+
     "logic": (
-        "&", "|", "!", "¬", "∧", "∨", "→", "←", "↔", "⊕", "⊤", "⊥",
+        "&",
+        "|",
+        "!",
+        "¬",
+        "∧",
+        "∨",
+        "→",
+        "←",
+        "↔",
+        "⊕",
+        "⊤",
+        "⊥",
     ),
+
     "comparison": (
-        "=", "==", "===", "!=", "!==",
-        "<", ">", "<=", ">=", "≤", "≥",
+        "=",
+        "==",
+        "===",
+        "!=",
+        "!==",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "≤",
+        "≥",
     ),
+
     "arrows": (
-        "→", "←", "↑", "↓", "↔", "↕",
-        "⇒", "⇐", "⇔", "↗", "↘", "↙", "↖",
+        "→",
+        "←",
+        "↑",
+        "↓",
+        "↔",
+        "↕",
+        "⇒",
+        "⇐",
+        "⇔",
+        "↗",
+        "↘",
+        "↙",
+        "↖",
     ),
+
     "operators": (
-        "+", "-", "*", "/", "%", "**", "//",
-        "++", "--", "+=", "-=", "*=", "/=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "**",
+        "//",
+        "++",
+        "--",
+        "+=",
+        "-=",
+        "*=",
+        "/=",
     ),
+
     "markup": (
-        "#", "##", "###", "*", "**", "_", "__",
-        "`", "```", ">", "-", "+",
+        "#",
+        "##",
+        "###",
+        "*",
+        "**",
+        "_",
+        "__",
+        "`",
+        "```",
+        ">",
+        "-",
+        "+",
     ),
-    "social": ("@", "#", "&"),
+
+    "social": (
+        "@",
+        "#",
+        "&",
+    ),
+
     "special": (
-        "©", "®", "™", "§", "¶", "°", "•", "·", "†", "‡",
+        "©",
+        "®",
+        "™",
+        "§",
+        "¶",
+        "°",
+        "•",
+        "·",
+        "†",
+        "‡",
     ),
 }
 
 
 def _build_symbol_index() -> dict[str, list[str]]:
     index: dict[str, list[str]] = {}
+
     for category, symbols in GLOBAL_SYMBOLS_BOARD.items():
         for symbol in symbols:
-            if symbol not in index:
-                index[symbol] = []
+            index.setdefault(symbol, [])
+
             if category not in index[symbol]:
                 index[symbol].append(category)
+
     return index
 
 
@@ -415,15 +712,31 @@ GLOBAL_SYMBOL_INDEX = _build_symbol_index()
 
 
 def recognize_global_symbols(text: str) -> list[dict[str, Any]]:
+    """
+    Return recognized symbols without altering the original text.
+    """
+
     if not text:
         return []
+
     found: list[dict[str, Any]] = []
-    for symbol, categories in GLOBAL_SYMBOL_INDEX.items():
+
+    # Longest symbols first so === is recognized before =.
+    symbols = sorted(
+        GLOBAL_SYMBOL_INDEX.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+
+    for symbol, categories in symbols:
         if symbol in text:
-            found.append({
-                "symbol": symbol,
-                "categories": list(categories),
-            })
+            found.append(
+                {
+                    "symbol": symbol,
+                    "categories": list(categories),
+                }
+            )
+
     return found
 
 
@@ -434,73 +747,185 @@ def global_symbols_board() -> dict[str, tuple[str, ...]]:
     }
 
 
-def full_text_placement_config() -> dict[str, Any]:
-    """GSP / MemoryGrid only — tokenizer does not apply these."""
-    return {
-        "forward_d": FORWARD_D,
-        "backward_d": BACKWARD_D,
-        "owner": "gsp_memory_grid",
-        "tokenizer_applies": False,
-    }
-
-
 # =====================================================================
 # LANGUAGE NORMALIZATION
 # =====================================================================
 
 def normalize_lang(lang: str | None) -> str:
+    """
+    Normalize a language code.
+
+    Unknown language codes are preserved as lower-case codes rather
+    than forcing the text itself into English.
+    """
+
     if not lang:
         return "en"
+
     code = (
-        lang.strip()
+        str(lang)
+        .strip()
         .lower()
         .replace("_", "-")
-        .split("-")[0]
     )
-    code = LANG_ALIASES.get(code, code)
-    if code in ALPHABETS and code != "default":
-        return code
-    return "en"
+
+    code = code.split("-")[0]
+
+    return LANG_ALIASES.get(code, code)
 
 
 def alphabet_for(lang: str | None) -> str:
-    return ALPHABETS.get(normalize_lang(lang), ALPHABETS["default"])
+    """
+    Return the known alphabet for a language.
+
+    Unknown languages receive the generic Unicode alphabet sentinel.
+    Their actual characters are indexed deterministically through the
+    fallback alphabet builder.
+    """
+
+    code = normalize_lang(lang)
+
+    if code in ALPHABETS:
+        return ALPHABETS[code]
+
+    return ALPHABETS["default"]
 
 
 def key_line_for(lang: str | None) -> str:
-    return KEY_LINES.get(normalize_lang(lang), KEY_LINES["default"])
+    code = normalize_lang(lang)
+    return KEY_LINES.get(code, KEY_LINES["default"])
+
+
+def _unicode_alphabet_for_text(text: str) -> str:
+    """
+    Build a deterministic alphabet for an unsupported script/language.
+
+    This is intentionally based on Unicode code-point ordering rather
+    than an arbitrary encounter order.
+
+    Known language alphabets always take precedence.
+    """
+
+    chars: set[str] = set()
+
+    for ch in text:
+        if ch.isalpha():
+            chars.add(ch.lower())
+
+    return "".join(sorted(chars, key=lambda c: ord(c)))
 
 
 def grid_dims(lang: str | None) -> dict[str, Any]:
     """
-    Linguistic dimensions:
-        letter: A × 1
-        word:   A × A  (metadata)
-    Operational word row uses R = 26 for all languages.
+    Report tokenizer/grid dimensions.
+
+    Letter-grid dimensions follow the active language alphabet.
+
+    Word placement itself remains fixed at:
+
+        46 × 26
     """
-    A = len(alphabet_for(lang))
+
+    code = normalize_lang(lang)
+    alpha = alphabet_for(code)
+
     return {
-        "A": A,
-        "letter": f"{A}x1",
-        "word": f"{A}x{A}",
+        "A": len(alpha),
+        "letter": f"{len(alpha)}x1",
+        "word": f"{WORD_GRID_COLUMNS}x{WORD_GRID_ROWS}",
         "letter_R": LETTER_GRID_R,
         "word_R": WORD_GRID_R,
+        "word_columns": WORD_GRID_COLUMNS,
+        "word_rows": WORD_GRID_ROWS,
+        "lang": code,
     }
 
 
 # =====================================================================
-# STEM TOKEN
+# NORMALIZATION
+# =====================================================================
+
+def normalize_text(text: str | None) -> str:
+    """
+    Unicode-safe general text normalization.
+
+    Keeps letters, numbers, whitespace and symbols.
+    """
+
+    if text is None:
+        return ""
+
+    text = unicodedata.normalize("NFKC", str(text))
+
+    # Normalize whitespace without destroying non-Latin scripts.
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+def normalize_lexical_token(
+    token: str | None,
+    lang: str | None = "en",
+) -> str:
+    """
+    Normalize a lexical token while preserving its script.
+
+    IMPORTANT:
+    - punctuation around a word is not part of lexical identity
+    - Unicode letters/numbers are retained
+    - the lexical UID is based on this full normalized token
+    - stemming does NOT alter UID identity
+    """
+
+    if token is None:
+        return ""
+
+    text = unicodedata.normalize("NFKC", str(token)).strip().lower()
+
+    if not text:
+        return ""
+
+    # Keep every Unicode letter/number.
+    chars = []
+
+    for ch in text:
+        if ch.isalnum():
+            chars.append(ch)
+
+    return "".join(chars)
+
+
+# =====================================================================
+# STEM METADATA
 # =====================================================================
 
 def stem_token(token: str, lang: str = "en") -> str:
-    lang = normalize_lang(lang)
-    w = (token or "").lower()
-    alpha = alphabet_for(lang)
-    w = "".join(ch for ch in w if ch.isalnum() or ch in alpha)
+    """
+    Lightweight stem metadata.
 
-    if lang in {
-        "ar", "hi", "bn", "ja", "ko", "th",
-        "he", "el", "ru", "uk",
+    The stem is NOT used to generate lexical UID.
+
+    This function remains intentionally conservative for non-Latin
+    languages.
+    """
+
+    code = normalize_lang(lang)
+    w = normalize_lexical_token(token, code)
+
+    if not w:
+        return ""
+
+    if code in {
+        "ar",
+        "hi",
+        "bn",
+        "ja",
+        "ko",
+        "th",
+        "he",
+        "el",
+        "ru",
+        "uk",
     }:
         return w
 
@@ -512,357 +937,88 @@ def stem_token(token: str, lang: str = "en") -> str:
             w = w[len(pref):]
             break
 
-    for suf in sorted(SUFFIXES, key=len, reverse=True):
-        if w.endswith(suf) and len(w) - len(suf) >= 3:
-            w = w[: -len(suf)]
+    for suffix in sorted(SUFFIXES, key=len, reverse=True):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            w = w[: -len(suffix)]
             break
 
-    return w or (token or "").lower()
+    return w or normalize_lexical_token(token, code)
 
 
 # =====================================================================
-# ALPHABET / LETTER INDEX
+# ALPHABET INDEXING
 # =====================================================================
 
-def alphabet_index(ch: str, lang: str = "en") -> int | None:
-    """Unreduced alphabet position (fold bridge to English when needed)."""
-    lang = normalize_lang(lang)
-    alpha = alphabet_for(lang)
-    ch = (ch or "").lower()
+def alphabet_index(
+    ch: str,
+    lang: str = "en",
+    text_context: str | None = None,
+) -> int | None:
+    """
+    Return the deterministic ZERO-BASED alphabet index.
 
-    if ch in alpha:
-        return alpha.index(ch)
+    For known languages:
+        use the configured language alphabet.
 
-    folded = ch.translate(_FOLD)
-    en = ALPHABETS["en"]
-    if folded in en:
-        return en.index(folded)
-    if len(folded) > 1 and folded[0] in en:
-        return en.index(folded[0])
+    For unknown languages/scripts:
+        construct a deterministic Unicode alphabet from the supplied
+        text context.
+
+    English example:
+
+        A -> 0
+        Z -> 25
+    """
+
+    if not ch:
+        return None
+
+    code = normalize_lang(lang)
+    ch = str(ch)[0].lower()
+
+    alpha = ALPHABETS.get(code)
+
+    if alpha is not None:
+        if ch in alpha:
+            return alpha.index(ch)
+
+        # Accent/code-mix bridge.
+        folded = ch.translate(_FOLD)
+
+        if folded in alpha:
+            return alpha.index(folded)
+
+        # Latin bridge to English.
+        if folded in ALPHABETS["en"]:
+            return ALPHABETS["en"].index(folded)
+
+        if len(folded) > 1 and folded[0] in ALPHABETS["en"]:
+            return ALPHABETS["en"].index(folded[0])
+
+        return None
+
+    # Unknown language/script.
+    context = text_context or ch
+    dynamic_alpha = _unicode_alphabet_for_text(context)
+
+    if ch in dynamic_alpha:
+        return dynamic_alpha.index(ch)
+
     return None
 
 
-def raw_letter_index(ch: str, lang: str = "en") -> int | None:
-    """Alias: unreduced alphabet index (useful for c)."""
-    return alphabet_index(ch, lang)
-
-
-def letter_index(ch: str, lang: str = "en") -> int | None:
-    """
-    Letter-grid COLUMN on A × 1.
-
-    R = 1 means single row (row = 0), NOT (index % 1).
-    Does not compute c. Does not apply K.
-    """
-    index = alphabet_index(ch, lang)
-    if index is None:
-        return None
-    return index
-
-
-def letter_cell(ch: str, lang: str = "en") -> dict[str, int] | None:
-    """Explicit A×1 cell."""
-    col = letter_index(ch, lang)
-    if col is None:
-        return None
-    return {
-        "col": col,
-        "row": 0,
-        "R": LETTER_GRID_R,
-    }
-
-
-def letter_cells(token: str, lang: str = "en") -> list[int]:
-    """Sequence of letter-grid columns for lex letter scoring."""
-    cells: list[int] = []
-    for ch in token:
-        index = letter_index(ch, lang)
-        if index is not None:
-            cells.append(index)
-    return cells
-
-
-def first_letter_index(word: str, lang: str = "en") -> int:
-    """
-    c = first-letter alphabet index.
-
-    CONSTANT for the token.
-    NOT modulo A.
-    NOT modulo 26.
-    Independent of word-row math.
-    """
-    if not word:
-        return 0
-    index = alphabet_index(word[0], lang)
-    return 0 if index is None else index
-
-
-# =====================================================================
-# WORD INDEX / WORD CELL
-# =====================================================================
-
-def word_index(token: str, lang: str = "en") -> int:
-    """
-    Word-grid ROW only:
-        L % 26
-    """
-    stem = stem_token(token, lang)
-    L = max(len(stem), 1)
-    return L % WORD_GRID_R
-
-
-def word_cell(token: str, lang: str = "en") -> dict[str, Any]:
-    """
-    Word-grid representation.
-
-    L      = len(stem)
-    uID    = L
-    word_S = L
-    c      = first_letter_index  (NOT reduced)
-    col    = c
-    row    = (L + L) % 26
-
-    No K.
-    """
-    lang = normalize_lang(lang)
-    stem = stem_token(token, lang)
-    L = max(len(stem), 1)
-    A = len(alphabet_for(lang))
-    c = first_letter_index(stem, lang)
-    row = (L + L) % WORD_GRID_R
-
-    return {
-        "L": L,
-        "uID": L,
-        "word_S": L,
-        "c": c,
-        "col": c,
-        "row": row,
-        "A": A,
-        "R": WORD_GRID_R,
-        "lang": lang,
-        "grid": f"{A}x{A}",
-        "row_rule": f"(L+L)%{WORD_GRID_R}",
-    }
-
-
-# =====================================================================
-# GSP INPUTS / START ROW (delegate only)
-# =====================================================================
-
-def _local_lsum(stem: str) -> int:
-    return max(len(stem), 1)
-
-
-def _local_ssum(stem: str) -> int:
-    total = 0
-    for ch in stem:
-        if ch.isdigit():
-            total += int(ch)
-        else:
-            total += ord(ch) % 10
-    return total or 1
-
-
-def gsp_inputs(token: str, lang: str = "en") -> dict[str, int]:
-    """
-    GSP-facing values. Tokenizer does not own storage placement.
-    Prefer keyboard.calculate_lsum / calculate_ssum when present.
-    """
-    lang = normalize_lang(lang)
-    stem = stem_token(token, lang)
-    c = first_letter_index(stem, lang)
-
-    if keyboard is not None and hasattr(keyboard, "calculate_lsum"):
-        Lsum = keyboard.calculate_lsum(stem, lang)
-        Ssum = keyboard.calculate_ssum(stem, lang)
-    else:
-        Lsum = _local_lsum(stem)
-        Ssum = _local_ssum(stem)
-
-    return {
-        "Lsum": int(Lsum),
-        "Ssum": int(Ssum),
-        "c": int(c),
-    }
-
-
-def gsp_start_row(token: str, lang: str = "en", R: int = 64) -> int:
-    """
-    start_row = ((Lsum + Ssum - 1) % R) + 1
-    """
-    values = gsp_inputs(token, lang)
-    if keyboard is not None and hasattr(keyboard, "start_row"):
-        return int(keyboard.start_row(values["Lsum"], values["Ssum"], R))
-    return ((values["Lsum"] + values["Ssum"] - 1) % R) + 1
-
-
-# =====================================================================
-# TOKENIZE
-# =====================================================================
-
-def tokenize(text: str, lang: str = "en") -> list[dict[str, Any]]:
-    lang = normalize_lang(lang)
-    raw = re.sub(r"\s+", " ", (text or "").strip().lower())
-    if not raw:
-        return []
-
-    out: list[dict[str, Any]] = []
-    for part in raw.split(" "):
-        if not part:
-            continue
-        stem = stem_token(part, lang)
-        out.append({
-            "original": part,
-            "stem": stem,
-            "lang": lang,
-            "letter": letter_cells(stem, lang),
-            "word": word_cell(stem, lang),
-            "symbols": recognize_global_symbols(part),
-        })
-    return out
-
-
-# =====================================================================
-# LETTER SCORE
-# =====================================================================
-
-def letter_score(
-    query_tokens: list[dict],
-    doc_text: str,
+def raw_letter_index(
+    ch: str,
     lang: str = "en",
-) -> float:
-    lang = normalize_lang(lang)
-    doc_toks = tokenize(doc_text, lang)
-    if not query_tokens or not doc_toks:
-        return 0.0
+    text_context: str | None = None,
+) -> int | None:
+    """
+    Alias for the unreduced zero-based alphabet index.
+    """
 
-    score = 0.0
-    for qt in query_tokens:
-        q_letters = qt.get("letter") or []
-        if not q_letters:
-            continue
-        for dt in doc_toks:
-            d_letters = dt.get("letter") or []
-            i = j = matches = 0
-            while i < len(q_letters) and j < len(d_letters):
-                if q_letters[i] == d_letters[j]:
-                    matches += 1
-                    i += 1
-                j += 1
-            score += (matches / max(len(q_letters), 1)) * 10
-    return score
+    return alphabet_index(ch, lang, text_context)
 
 
-
-# =====================================================================
-# WORD SCORE
-# =====================================================================
-
-def word_score(
-    query_tokens: list[dict],
-    doc_text: str,
-    lang: str = "en",
-) -> float:
-    lang = normalize_lang(lang)
-    doc_toks = tokenize(doc_text, lang)
-    if not query_tokens or not doc_toks:
-        return 0.0
-
-    score = 0.0
-    doc_cells = {
-        (t["word"]["col"], t["word"]["row"], t["stem"])
-        for t in doc_toks
-    }
-
-    for qt in query_tokens:
-        w = qt["word"]
-        stem = qt["stem"]
-        for col, row, d_stem in doc_cells:
-            if stem == d_stem:
-                score += 25
-            elif w["col"] == col and w["row"] == row:
-                score += 15
-            elif w["col"] == col or w["row"] == row:
-                score += 5
-    return score
-
-
-# =====================================================================
-# LANGUAGE REGISTRY HELPERS
-# =====================================================================
-
-def supported_languages() -> list[dict[str, Any]]:
-    out = []
-    for code, alpha in ALPHABETS.items():
-        if code == "default":
-            continue
-        A = len(alpha)
-        out.append({
-            "code": code,
-            "A": A,
-            "letter_grid": f"{A}x1",
-            "word_grid": f"{A}x{A}",
-            "word_R": WORD_GRID_R,
-            "key_line": KEY_LINES.get(code, KEY_LINES["default"]),
-        })
-    return out
-
-
-def language_key_mapping(lang: str | None) -> dict[str, Any]:
-    code = normalize_lang(lang)
-    alpha = alphabet_for(code)
-    key_line = key_line_for(code)
-    A = len(alpha)
-    return {
-        "code": code,
-        "alphabet": alpha,
-        "key_line": key_line,
-        "A": A,
-        "letter_grid": f"{A}x1",
-        "word_grid": f"{A}x{A}",
-        "letter_R": LETTER_GRID_R,
-        "word_R": WORD_GRID_R,
-    }
-
-
-# =====================================================================
-# TEST / DEVELOPMENT
-# =====================================================================
-
-if __name__ == "__main__":
-    print("English mapping:")
-    print(language_key_mapping("en"))
-
-    print("\nArabic mapping:")
-    print(language_key_mapping("ar"))
-
-    print("\nYoruba mapping:")
-    print(language_key_mapping("yo"))
-
-    print("\nLetter index A:")
-    print(letter_index("A", "en"))
-
-    print("\nLetter cell A:")
-    print(letter_cell("A", "en"))
-
-    print("\nFirst-letter c (apple):")
-    print(first_letter_index("apple", "en"))
-
-    print("\nWord cell (deterministic):")
-    print(word_cell("deterministic", "en"))
-
-    print("\nGSP inputs:")
-    print(gsp_inputs("deterministic", "en"))
-
-    print("\nGSP start row:")
-    print(gsp_start_row("deterministic", "en"))
-
-    print("\nSymbols:")
-    print(recognize_global_symbols("Can GSP calculate x >= 10%?"))
-
-    print("\nFull-text placement config:")
-    print(full_text_placement_config())
-
-    print("\nTokenize sample:")
-    print(tokenize("jollof rice ₦500", "en"))
+def letter_index(
+    ch: str,
+    lang
