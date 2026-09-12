@@ -1008,4 +1008,4 @@ class WebCrawler:
 # ===========================================================================
 if __name__ == "__main__":
     print("CoMpaNeoN WebCrawler")
-    print("WebCrawler requires a shared MemoryGrid instance.")p
+    print("WebCrawler requires a shared MemoryGrid instance.")
