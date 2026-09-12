@@ -106,10 +106,12 @@ from typing import Any, Dict, List, Optional
 import httpx
 from bs4 import BeautifulSoup
 
+
+#
 ============================================================================
 
-INTERNAL DEPENDENCIES
-
+#INTERNAL DEPENDENCIES
+#
 ============================================================================
 
 from page_cache import PageCache
@@ -124,10 +126,11 @@ normalize_lang,
 tokenize,
 )
 
+#
 ============================================================================
 
-OPTIONAL EXTERNAL SOURCE ADAPTERS
-
+#OPTIONAL EXTERNAL SOURCE ADAPTERS
+#
 ============================================================================
 
 try:
@@ -160,10 +163,11 @@ fetch_financial_modelling_prep = None
 fetch_youtube = None
 fetch_apitube = None
 
+#
 ============================================================================
 
-WEB CRAWLER
-
+#WEB CRAWLER
+#
 ============================================================================
 
 class WebCrawler:
