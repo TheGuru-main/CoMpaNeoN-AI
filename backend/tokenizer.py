@@ -1021,4 +1021,848 @@ def raw_letter_index(
 
 def letter_index(
     ch: str,
-    lang
+    lang: str = "en",
+    text_context: str | None = None,
+) -> int | None:
+    """
+    Letter-grid column.
+
+    Letter grid is A × 1.
+
+    Row is always 0.
+
+    No K.
+    No GSP traversal.
+    """
+
+    return alphabet_index(ch, lang, text_context)
+
+
+def letter_cell(
+    ch: str,
+    lang: str = "en",
+    text_context: str | None = None,
+) -> dict[str, int] | None:
+    col = letter_index(ch, lang, text_context)
+
+    if col is None:
+        return None
+
+    return {
+        "col": col,
+        "row": 0,
+        "R": LETTER_GRID_R,
+    }
+
+
+def letter_cells(
+    token: str,
+    lang: str = "en",
+) -> list[int]:
+    """
+    Return the ordered character-index path.
+
+    This is NOT the lexical UID helper; it is retained as a
+    compatibility/letter-grid signal.
+    """
+
+    token = str(token or "")
+    cells: list[int] = []
+
+    for ch in token:
+        index = letter_index(
+            ch,
+            lang,
+            text_context=token,
+        )
+
+        if index is not None:
+            cells.append(index)
+
+    return cells
+
+
+def first_letter_index(
+    word: str,
+    lang: str = "en",
+) -> int:
+    """
+    SC — first-letter alphabet index.
+
+    SC is constant for the token.
+
+    It is not:
+        - random
+        - modulo 26
+        - modulo word-row
+        - derived from L + S
+    """
+
+    if not word:
+        return 0
+
+    normalized = normalize_lexical_token(word, lang)
+
+    if not normalized:
+        return 0
+
+    index = alphabet_index(
+        normalized[0],
+        lang,
+        text_context=normalized,
+    )
+
+    return 0 if index is None else index
+
+
+# =====================================================================
+# LEXICAL UID
+# =====================================================================
+
+def uid_sequence(
+    token: str,
+    lang: str = "en",
+) -> list[int]:
+    """
+    Generate the ordered lexical UID sequence.
+
+    Every character contributes its zero-based alphabet index.
+
+    Example:
+
+        ZED -> [25, 4, 3]
+        ZEE -> [25, 4, 4]
+    """
+
+    normalized = normalize_lexical_token(token, lang)
+
+    if not normalized:
+        return []
+
+    sequence: list[int] = []
+
+    for ch in normalized:
+        index = alphabet_index(
+            ch,
+            lang,
+            text_context=normalized,
+        )
+
+        if index is not None:
+            sequence.append(index)
+
+    return sequence
+
+
+def serialize_uid(
+    sequence: Iterable[int],
+) -> str:
+    """
+    Serialize the ordered UID sequence.
+
+    This is an identity representation.
+
+    IMPORTANT:
+    S is NOT calculated by digit-summing this string.
+    """
+
+    return "".join(str(int(value)) for value in sequence)
+
+
+def uid_for_token(
+    token: str,
+    lang: str = "en",
+) -> str:
+    return serialize_uid(uid_sequence(token, lang))
+
+
+def uid_digit_sum(
+    uid: str | Iterable[int],
+) -> int:
+    """
+    Compatibility helper.
+
+    Historically this represented digit summation.
+
+    It is deliberately NOT used for lexical S.
+
+    Use lexical_S() for the authoritative UID-sequence sum.
+    """
+
+    if isinstance(uid, str):
+        return sum(
+            int(ch)
+            for ch in uid
+            if ch.isdigit()
+        )
+
+    return sum(int(value) for value in uid)
+
+
+def lexical_L(
+    token: str,
+    lang: str = "en",
+) -> int:
+    """
+    L = normalized lexical token length.
+    """
+
+    normalized = normalize_lexical_token(token, lang)
+
+    return len(normalized)
+
+
+def lexical_S(
+    token: str,
+    lang: str = "en",
+) -> int:
+    """
+    Authoritative lexical S.
+
+    S = sum(ordered UID sequence)
+
+    NOT:
+        digit sum of serialized UID.
+    """
+
+    return sum(uid_sequence(token, lang))
+
+
+# =====================================================================
+# LEXICAL IDENTITY
+# =====================================================================
+
+def lexical_identity(
+    token: str,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """
+    Build the complete deterministic lexical identity.
+
+    This is the principal tokenizer output consumed by later
+    placement/retrieval layers.
+    """
+
+    code = normalize_lang(lang)
+
+    normalized = normalize_lexical_token(token, code)
+
+    sequence = uid_sequence(normalized, code)
+    uid = serialize_uid(sequence)
+
+    L = len(normalized)
+    S = sum(sequence)
+
+    SC = (
+        sequence[0]
+        if sequence
+        else 0
+    )
+
+    # Word-grid placement:
+    #
+    #   row = ((L + S - 1) % 26) + 1
+    #
+    # The physical word grid is 46 × 26.
+    #
+    # Column identity remains SC. The placement layer can map the
+    # alphabet index into its physical 46-column representation when
+    # required by the storage/grid implementation.
+    row = (
+        ((L + S - 1) % WORD_GRID_ROWS) + 1
+        if normalized
+        else 1
+    )
+
+    return {
+        "text": token,
+        "normalized": normalized,
+        "lang": code,
+
+        "L": L,
+
+        "uid_sequence": sequence,
+        "uID_sequence": sequence,
+        "uid": uid,
+        "uID": uid,
+
+        "S": S,
+        "SC": SC,
+
+        "word_grid": {
+            "columns": WORD_GRID_COLUMNS,
+            "rows": WORD_GRID_ROWS,
+            "col": SC,
+            "row": row,
+            "L": L,
+            "S": S,
+            "formula": f"((L+S-1)%{WORD_GRID_ROWS})+1",
+        },
+    }
+
+
+# =====================================================================
+# WORD GRID
+# =====================================================================
+
+def word_index(
+    token: str,
+    lang: str = "en",
+) -> int:
+    """
+    Compatibility helper.
+
+    Returns the one-based word-grid row.
+
+    Authoritative formula:
+
+        ((L + S - 1) % 26) + 1
+    """
+
+    identity = lexical_identity(token, lang)
+
+    return int(identity["word_grid"]["row"])
+
+
+def word_cell(
+    token: str,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """
+    Return deterministic 46 × 26 word-grid placement metadata.
+
+    IMPORTANT:
+
+        L = lexical token length
+        uID = ordered UID sequence
+        S = sum(uID sequence)
+        c/SC = first-letter alphabet index
+
+    Row:
+
+        ((L + S - 1) % 26) + 1
+
+    The UID sequence remains intact.
+    """
+
+    identity = lexical_identity(token, lang)
+
+    return {
+        "L": identity["L"],
+
+        "uID": identity["uid"],
+        "uid": identity["uid"],
+
+        "uid_sequence": list(identity["uid_sequence"]),
+        "uID_sequence": list(identity["uID_sequence"]),
+
+        "S": identity["S"],
+        "word_S": identity["S"],
+
+        "SC": identity["SC"],
+        "c": identity["SC"],
+        "col": identity["SC"],
+
+        "row": identity["word_grid"]["row"],
+
+        "columns": WORD_GRID_COLUMNS,
+        "rows": WORD_GRID_ROWS,
+
+        "R": WORD_GRID_ROWS,
+        "lang": identity["lang"],
+
+        "grid": f"{WORD_GRID_COLUMNS}x{WORD_GRID_ROWS}",
+
+        "row_rule": f"((L+S-1)%{WORD_GRID_ROWS})+1",
+    }
+
+
+# =====================================================================
+# CHARACTER RECORDS
+# =====================================================================
+
+def character_records(
+    token: str,
+    lang: str = "en",
+) -> list[dict[str, Any]]:
+    """
+    Decompose a lexical token into deterministic character records.
+
+    The character sequence is retained in order.
+    """
+
+    normalized = normalize_lexical_token(token, lang)
+
+    records: list[dict[str, Any]] = []
+
+    for position, ch in enumerate(normalized):
+        index = alphabet_index(
+            ch,
+            lang,
+            text_context=normalized,
+        )
+
+        records.append(
+            {
+                "char": ch,
+                "position": position,
+                "alphabet_index": index,
+                "uid_component": index,
+                "lang": normalize_lang(lang),
+            }
+        )
+
+    return records
+
+
+# =====================================================================
+# TOKENIZATION
+# =====================================================================
+
+_TOKEN_PATTERN = re.compile(
+    r"\S+",
+    flags=re.UNICODE,
+)
+
+
+def tokenize(
+    text: str,
+    lang: str = "en",
+) -> list[dict[str, Any]]:
+    """
+    Tokenize text into deterministic lexical records.
+
+    Every occurrence is preserved.
+
+    This means:
+
+        "hello hello"
+
+    produces two token records, not one.
+
+    The occurrence index is supplied by the token list position.
+    """
+
+    raw_text = normalize_text(text)
+
+    if not raw_text:
+        return []
+
+    code = normalize_lang(lang)
+
+    out: list[dict[str, Any]] = []
+
+    for token_index, match in enumerate(
+        _TOKEN_PATTERN.finditer(raw_text)
+    ):
+        original = match.group(0)
+
+        normalized = normalize_lexical_token(
+            original,
+            code,
+        )
+
+        # Symbol-only tokens are preserved as token records too.
+        if not normalized:
+            out.append(
+                {
+                    "token_index": token_index,
+                    "original": original,
+                    "normalized": "",
+                    "stem": "",
+                    "lang": code,
+                    "letter": [],
+                    "uid_sequence": [],
+                    "uID_sequence": [],
+                    "uid": "",
+                    "uID": "",
+                    "L": 0,
+                    "S": 0,
+                    "SC": 0,
+                    "word": {
+                        "columns": WORD_GRID_COLUMNS,
+                        "rows": WORD_GRID_ROWS,
+                        "col": 0,
+                        "row": 1,
+                        "L": 0,
+                        "S": 0,
+                        "uid_sequence": [],
+                    },
+                    "symbols": recognize_global_symbols(original),
+                }
+            )
+            continue
+
+        identity = lexical_identity(
+            normalized,
+            code,
+        )
+
+        out.append(
+            {
+                "token_index": token_index,
+                "original": original,
+                "normalized": normalized,
+                "stem": stem_token(normalized, code),
+                "lang": code,
+
+                "letter": letter_cells(
+                    normalized,
+                    code,
+                ),
+
+                "characters": character_records(
+                    normalized,
+                    code,
+                ),
+
+                "uid_sequence": list(
+                    identity["uid_sequence"]
+                ),
+
+                "uID_sequence": list(
+                    identity["uID_sequence"]
+                ),
+
+                "uid": identity["uid"],
+                "uID": identity["uID"],
+
+                "L": identity["L"],
+                "S": identity["S"],
+                "SC": identity["SC"],
+
+                "word": word_cell(
+                    normalized,
+                    code,
+                ),
+
+                "symbols": recognize_global_symbols(
+                    original
+                ),
+            }
+        )
+
+    return out
+
+
+def tokenize_words(
+    text: str,
+    lang: str = "en",
+) -> list[dict[str, Any]]:
+    """
+    Alias for word-level deterministic tokenization.
+    """
+
+    return tokenize(text, lang)
+
+
+def unique_lexical_tokens(
+    text: str,
+    lang: str = "en",
+) -> list[str]:
+    """
+    Return unique normalized lexical tokens while preserving order.
+    """
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for record in tokenize(text, lang):
+        token = record.get("normalized", "")
+
+        if not token:
+            continue
+
+        if token not in seen:
+            seen.add(token)
+            result.append(token)
+
+    return result
+
+
+# =====================================================================
+# FULL-TEXT UID SUPPORT
+# =====================================================================
+
+def text_uid_sequences(
+    text: str,
+    lang: str = "en",
+) -> list[list[int]]:
+    """
+    Return the ordered UID sequence for every lexical word occurrence.
+
+    Full-text placement uses these sequences downstream.
+
+    This function does NOT perform full-text placement.
+    """
+
+    return [
+        list(record["uid_sequence"])
+        for record in tokenize(text, lang)
+        if record.get("uid_sequence")
+    ]
+
+
+def text_uid_sequence(
+    text: str,
+    lang: str = "en",
+) -> list[int]:
+    """
+    Flatten word UID sequences while preserving word and character order.
+
+    This is the sequence handed to the full-text placement layer for
+    column-index UID chaining.
+    """
+
+    sequence: list[int] = []
+
+    for word_sequence in text_uid_sequences(text, lang):
+        sequence.extend(word_sequence)
+
+    return sequence
+
+
+def text_uid(
+    text: str,
+    lang: str = "en",
+) -> str:
+    """
+    Serialize the flattened full-text UID sequence.
+
+    The full-text placement layer decides how this is used for
+    full-text S/placement.
+    """
+
+    return serialize_uid(
+        text_uid_sequence(text, lang)
+    )
+
+
+def text_S(
+    text: str,
+    lang: str = "en",
+) -> int:
+    """
+    Total UID S for full-text placement.
+
+    S is calculated from UID components, not decimal digits.
+    """
+
+    return sum(
+        text_uid_sequence(text, lang)
+    )
+
+
+def full_text_uid_data(
+    text: str,
+    lang: str = "en",
+) -> dict[str, Any]:
+    """
+    Return the tokenizer-side full-text identity.
+
+    The actual full-text grid placement remains outside tokenizer.py.
+    """
+
+    sequences = text_uid_sequences(text, lang)
+    flattened = text_uid_sequence(text, lang)
+
+    return {
+        "lang": normalize_lang(lang),
+        "uid_sequences": sequences,
+        "uid_sequence": flattened,
+        "uid": serialize_uid(flattened),
+        "S": sum(flattened),
+        "token_count": len(sequences),
+    }
+
+
+# =====================================================================
+# GSP INPUTS
+# =====================================================================
+
+def _local_lsum(stem: str) -> int:
+    return max(len(stem), 1)
+
+
+def _local_ssum(stem: str) -> int:
+    """
+    Compatibility fallback only.
+
+    The authoritative lexical S is lexical_S(), which is based on
+    UID sequence.
+
+    This fallback exists for older GSP callers that expect keyboard.py
+    Lsum/Ssum behavior.
+    """
+
+    total = 0
+
+    for ch in stem:
+        if ch.isdigit():
+            total += int(ch)
+        else:
+            total += ord(ch) % 10
+
+    return total or 1
+
+
+def gsp_inputs(
+    token: str,
+    lang: str = "en",
+) -> dict[str, int]:
+    """
+    GSP-facing lexical inputs.
+
+    The lexical UID values are exposed explicitly.
+
+    If keyboard.py provides its established GSP calculations,
+    those calculations remain authoritative for GSP compatibility.
+
+    Tokenizer does not perform GSP traversal.
+    """
+
+    code = normalize_lang(lang)
+    normalized = normalize_lexical_token(token, code)
+
+    identity = lexical_identity(
+        normalized,
+        code,
+    )
+
+    result: dict[str, int] = {
+        "L": int(identity["L"]),
+        "S": int(identity["S"]),
+        "SC": int(identity["SC"]),
+    }
+
+    # Preserve the established keyboard/GSP API when available.
+    if keyboard is not None:
+        if hasattr(keyboard, "calculate_lsum"):
+            try:
+                result["Lsum"] = int(
+                    keyboard.calculate_lsum(
+                        normalized,
+                        code,
+                    )
+                )
+            except Exception:
+                result["Lsum"] = _local_lsum(normalized)
+        else:
+            result["Lsum"] = _local_lsum(normalized)
+
+        if hasattr(keyboard, "calculate_ssum"):
+            try:
+                result["Ssum"] = int(
+                    keyboard.calculate_ssum(
+                        normalized,
+                        code,
+                    )
+                )
+            except Exception:
+                result["Ssum"] = _local_ssum(normalized)
+        else:
+            result["Ssum"] = _local_ssum(normalized)
+    else:
+        result["Lsum"] = _local_lsum(normalized)
+        result["Ssum"] = _local_ssum(normalized)
+
+    # Compatibility c.
+    result["c"] = int(identity["SC"])
+
+    return result
+
+
+def gsp_start_row(
+    token: str,
+    lang: str = "en",
+    R: int = 64,
+) -> int:
+    """
+    Return the canonical GSP start row.
+
+    This remains a GSP-facing helper.
+
+    Preferred authority is keyboard.py.
+
+    Fallback:
+
+        ((Lsum + Ssum - 1) % R) + 1
+    """
+
+    values = gsp_inputs(token, lang)
+
+    if keyboard is not None:
+        if hasattr(keyboard, "start_row"):
+            try:
+                return int(
+                    keyboard.start_row(
+                        values["Lsum"],
+                        values["Ssum"],
+                        R,
+                    )
+                )
+            except Exception:
+                pass
+
+        if hasattr(keyboard, "gsp_start_row"):
+            try:
+                return int(
+                    keyboard.gsp_start_row(
+                        values["Lsum"],
+                        values["Ssum"],
+                        R,
+                    )
+                )
+            except Exception:
+                pass
+
+    return (
+        (values["Lsum"] + values["Ssum"] - 1) % R
+    ) + 1
+
+
+def full_text_placement_config() -> dict[str, Any]:
+    """
+    Configuration metadata only.
+
+    GSP/MemoryGrid owns actual traversal and placement.
+    """
+
+    return {
+        "forward_d": FORWARD_D,
+        "backward_d": BACKWARD_D,
+        "owner": "gsp_memory_grid",
+        "tokenizer_applies": False,
+        "word_grid_columns": WORD_GRID_COLUMNS,
+        "word_grid_rows": WORD_GRID_ROWS,
+        "full_text_uid_chaining": True,
+        "full_text_uid_source": "ordered_word_uid_sequences",
+        "full_text_S_source": "sum(total_uid_sequence)",
+    }
+
+
+# =====================================================================
+# LEXICAL SCORING
+# =====================================================================
+
+def letter_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+    """
+    Lightweight lexical letter-path similarity.
+
+    This is a signal only.
+
+    Ranking policy remains in ranking.py.
+    """
+
+    doc_tokens = tokenize(doc_text, lang)
+
+    if not query_tokens or not doc_tokens:
+        return 0.0
+
+    score = 0.0
+
+    for query i
