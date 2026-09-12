@@ -1865,4 +1865,263 @@ def letter_score(
 
     score = 0.0
 
-    for query i
+    for query in query_tokens:
+        q_letters = query.get("letter") or []
+
+        if not q_letters:
+            continue
+
+        for document in doc_tokens:
+            d_letters = document.get("letter") or []
+
+            i = 0
+            j = 0
+            matches = 0
+
+            while (
+                i < len(q_letters)
+                and j < len(d_letters)
+            ):
+                if q_letters[i] == d_letters[j]:
+                    matches += 1
+                    i += 1
+
+                j += 1
+
+            score += (
+                matches
+                / max(len(q_letters), 1)
+            ) * 10
+
+    return score
+
+
+def word_score(
+    query_tokens: list[dict],
+    doc_text: str,
+    lang: str = "en",
+) -> float:
+    """
+    Lightweight word-grid similarity.
+
+    This is not ranking policy.
+    """
+
+    doc_tokens = tokenize(doc_text, lang)
+
+    if not query_tokens or not doc_tokens:
+        return 0.0
+
+    score = 0.0
+
+    doc_cells = {
+        (
+            token["word"]["col"],
+            token["word"]["row"],
+            token["normalized"],
+        )
+        for token in doc_tokens
+        if token.get("normalized")
+    }
+
+    for query in query_tokens:
+        normalized = query.get(
+            "normalized",
+            query.get("stem", ""),
+        )
+
+        word = query.get("word") or {}
+
+        for col, row, doc_word in doc_cells:
+
+            if normalized == doc_word:
+                score += 25
+
+            elif (
+                word.get("col") == col
+                and word.get("row") == row
+            ):
+                score += 15
+
+            elif (
+                word.get("col") == col
+                or word.get("row") == row
+            ):
+                score += 5
+
+    return score
+
+
+# =====================================================================
+# LANGUAGE REGISTRY
+# =====================================================================
+
+def supported_languages() -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+
+    for code, alphabet in ALPHABETS.items():
+
+        if code == "default":
+            continue
+
+        result.append(
+            {
+                "code": code,
+                "A": len(alphabet),
+                "letter_grid": f"{len(alphabet)}x1",
+                "word_grid": (
+                    f"{WORD_GRID_COLUMNS}x{WORD_GRID_ROWS}"
+                ),
+                "word_R": WORD_GRID_R,
+                "word_columns": WORD_GRID_COLUMNS,
+                "word_rows": WORD_GRID_ROWS,
+                "key_line": KEY_LINES.get(
+                    code,
+                    KEY_LINES["default"],
+                ),
+            }
+        )
+
+    return result
+
+
+def language_key_mapping(
+    lang: str | None,
+) -> dict[str, Any]:
+    code = normalize_lang(lang)
+
+    alphabet = alphabet_for(code)
+    key_line = key_line_for(code)
+
+    return {
+        "code": code,
+        "alphabet": alphabet,
+        "key_line": key_line,
+        "A": len(alphabet),
+
+        "letter_grid": f"{len(alphabet)}x1",
+
+        "word_grid": (
+            f"{WORD_GRID_COLUMNS}x{WORD_GRID_ROWS}"
+        ),
+
+        "letter_R": LETTER_GRID_R,
+        "word_R": WORD_GRID_R,
+
+        "word_columns": WORD_GRID_COLUMNS,
+        "word_rows": WORD_GRID_ROWS,
+    }
+
+
+# =====================================================================
+# VALIDATION
+# =====================================================================
+
+def _validate_identity_examples() -> None:
+    """
+    Locked identity checks.
+
+    These are development assertions and do not run on import.
+    """
+
+    zed = lexical_identity("ZED", "en")
+    zee = lexical_identity("ZEE", "en")
+
+    assert zed["uid_sequence"] == [25, 4, 3]
+    assert zee["uid_sequence"] == [25, 4, 4]
+
+    assert zed["uid"] == "2543"
+    assert zee["uid"] == "2544"
+
+    # S is the sum of UID COMPONENTS.
+    assert zed["S"] == 32
+    assert zee["S"] == 33
+
+    assert zed["L"] == 3
+    assert zee["L"] == 3
+
+    assert zed["SC"] == 25
+    assert zee["SC"] == 25
+
+    # Word grid:
+    #
+    # ZED:
+    # ((3 + 32 - 1) % 26) + 1 = 10
+    #
+    # ZEE:
+    # ((3 + 33 - 1) % 26) + 1 = 11
+
+    assert zed["word_grid"]["row"] == 10
+    assert zee["word_grid"]["row"] == 11
+
+
+# =====================================================================
+# DEVELOPMENT ENTRY POINT
+# =====================================================================
+
+if __name__ == "__main__":
+
+    _validate_identity_examples()
+
+    print("CoMpaNeoN tokenizer validation passed.")
+    print()
+
+    print("ZED:")
+    print(lexical_identity("ZED", "en"))
+    print()
+
+    print("ZEE:")
+    print(lexical_identity("ZEE", "en"))
+    print()
+
+    print("Arabic:")
+    print(
+        tokenize(
+            "مرحبا بالعالم",
+            "ar",
+        )
+    )
+    print()
+
+    print("Yoruba:")
+    print(
+        tokenize(
+            "Ẹ káàrọ̀",
+            "yo",
+        )
+    )
+    print()
+
+    print("Japanese:")
+    print(
+        tokenize(
+            "こんにちは 世界",
+            "ja",
+        )
+    )
+    print()
+
+    print("Chinese:")
+    print(
+        tokenize(
+            "你好世界",
+            "zh",
+        )
+    )
+    print()
+
+    print("Full text UID:")
+    print(
+        full_text_uid_data(
+            "ZEE ZED",
+            "en",
+        )
+    )
+    print()
+
+    print("Symbols:")
+    print(
+        recognize_global_symbols(
+            "Can GSP calculate x >= 10%?"
+        )
+    )
