@@ -668,4 +668,344 @@ class WebCrawler:
         results = []
         for url in urls:
             results.append(
-                self.crawl(u
+                self.crawl(url=url, source_type=source_type, lang=lang)
+            )
+        return results
+
+    # -----------------------------------------------------------------------
+    # EXTERNAL SOURCE DISPATCH
+    # -----------------------------------------------------------------------
+    async def acquire_external(
+        self,
+        source: str,
+        query: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+
+        source_key = str(source).strip().lower()
+        adapter = self.external_sources.get(source_key)
+
+        if adapter is None:
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": f"No external adapter registered for {source_key}",
+            }
+
+        if not callable(adapter):
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": f"Adapter unavailable: {source_key}",
+            }
+
+        self.external_requests += 1
+
+        # Try with kwargs first, then fall back to query-only.
+        try:
+            result = adapter(query, **kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+        except TypeError:
+            try:
+                result = adapter(query)
+                if inspect.isawaitable(result):
+                    result = await result
+            except Exception as exc:
+                return {
+                    "source": source_key,
+                    "query": query,
+                    "indexed": False,
+                    "error": str(exc),
+                }
+        except Exception as exc:
+            return {
+                "source": source_key,
+                "query": query,
+                "indexed": False,
+                "error": str(exc),
+            }
+
+        documents = self._extract_external_documents(result)
+        indexed_documents = []
+
+        for document in documents:
+            text = document.get("text", "")
+            if not text:
+                continue
+
+            indexed = self.acquire_document(
+                text=text,
+                url=document.get("url", ""),
+                lang=document.get("language"),
+                source_type=source_key,
+                metadata=document.get("metadata", {}),
+            )
+            indexed_documents.append(indexed)
+
+        self.external_documents += len(indexed_documents)
+
+        return {
+            "source": source_key,
+            "query": query,
+            "documents": indexed_documents,
+            "document_count": len(indexed_documents),
+            "indexed": bool(indexed_documents),
+        }
+
+    # -----------------------------------------------------------------------
+    # EXTERNAL RESULT NORMALIZATION
+    # -----------------------------------------------------------------------
+    def _extract_external_documents(
+        self, result: Any
+    ) -> List[Dict[str, Any]]:
+
+        documents: List[Dict[str, Any]] = []
+
+        if result is None:
+            return documents
+
+        if isinstance(result, dict):
+            # Direct text payload
+            if result.get("text"):
+                documents.append(
+                    {
+                        "text": result["text"],
+                        "url": result.get("url", ""),
+                        "language": result.get("language"),
+                        "metadata": result.get("metadata", {}),
+                    }
+                )
+
+            # Collection payloads
+            for key in (
+                "articles",
+                "ebooks",
+                "books",
+                "elibrary",
+                "code_books",
+                "results",
+                "items",
+            ):
+                items = result.get(key, [])
+                if not isinstance(items, list):
+                    continue
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    text_parts = []
+                    for field in (
+                        "title",
+                        "description",
+                        "extract",
+                        "summary",
+                        "content",
+                        "text",
+                        "author",
+                    ):
+                        value = item.get(field)
+                        if value:
+                            text_parts.append(str(value))
+
+                    if not text_parts:
+                        continue
+
+                    documents.append(
+                        {
+                            "text": "\n".join(text_parts),
+                            "url": item.get("url") or item.get("infoLink", ""),
+                            "language": item.get("language"),
+                            "metadata": {"external_record": item},
+                        }
+                    )
+
+            # Video results
+            videos = result.get("videos", [])
+            if isinstance(videos, list):
+                for video in videos:
+                    if isinstance(video, dict):
+                        documents.extend(self._video_to_documents(video))
+
+            # Direct transcript
+            transcript = result.get("transcript")
+            if transcript:
+                documents.append(
+                    {
+                        "text": str(transcript),
+                        "url": result.get("url", ""),
+                        "language": result.get("language"),
+                        "metadata": {
+                            "content_type": "video_transcript",
+                            "transcript": True,
+                        },
+                    }
+                )
+
+        elif isinstance(result, list):
+            for item in result:
+                documents.extend(self._extract_external_documents(item))
+
+        return documents
+
+    # -----------------------------------------------------------------------
+    # VIDEO NORMALIZATION
+    # -----------------------------------------------------------------------
+    def _video_to_documents(
+        self, video: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+
+        self.video_sources += 1
+        documents: List[Dict[str, Any]] = []
+
+        title = video.get("title", "")
+        description = video.get("description", "")
+        url = video.get("url") or video.get("video_url", "")
+        language = video.get("language")
+
+        metadata = {
+            "content_type": "video",
+            "video_id": video.get("id"),
+            "channel": video.get("channel"),
+            "author": video.get("author"),
+            "published_at": video.get("published_at"),
+            "duration": video.get("duration"),
+            "thumbnail": video.get("thumbnail"),
+        }
+
+        metadata_text = "\n".join(
+            part for part in (title, description) if part
+        )
+
+        if metadata_text:
+            documents.append(
+                {
+                    "text": metadata_text,
+                    "url": url,
+                    "language": language,
+                    "metadata": metadata,
+                }
+            )
+
+        subtitles = video.get("subtitles")
+        if subtitles:
+            subtitle_text = self._normalize_subtitles(subtitles)
+            if subtitle_text:
+                self.transcripts_acquired += 1
+                documents.append(
+                    {
+                        "text": subtitle_text,
+                        "url": url,
+                        "language": language,
+                        "metadata": {
+                            **metadata,
+                            "content_type": "video_subtitles",
+                            "subtitles": True,
+                        },
+                    }
+                )
+
+        transcript = video.get("transcript")
+        if transcript:
+            self.transcripts_acquired += 1
+            documents.append(
+                {
+                    "text": str(transcript),
+                    "url": url,
+                    "language": language,
+                    "metadata": {
+                        **metadata,
+                        "content_type": "video_transcript",
+                        "transcript": True,
+                    },
+                }
+            )
+
+        return documents
+
+    # -----------------------------------------------------------------------
+    # SUBTITLE NORMALIZATION
+    # -----------------------------------------------------------------------
+    def _normalize_subtitles(self, subtitles: Any) -> str:
+
+        if isinstance(subtitles, str):
+            return self.normalize_text(subtitles)
+
+        if not isinstance(subtitles, list):
+            return ""
+
+        lines = []
+        for item in subtitles:
+            if isinstance(item, str):
+                lines.append(item)
+            elif isinstance(item, dict):
+                text = (
+                    item.get("text")
+                    or item.get("caption")
+                    or item.get("content")
+                )
+                if text:
+                    lines.append(str(text))
+
+        return self.normalize_text(" ".join(lines))
+
+    # -----------------------------------------------------------------------
+    # CONVENIENCE: YOUTUBE / APITUBE
+    # -----------------------------------------------------------------------
+    async def crawl_youtube(self, query: str, **kwargs: Any) -> Dict[str, Any]:
+        return await self.acquire_external(
+            source="youtube", query=query, **kwargs
+        )
+
+    async def crawl_apitube(self, query: str, **kwargs: Any) -> Dict[str, Any]:
+        return await self.acquire_external(
+            source="apitube", query=query, **kwargs
+        )
+
+    # -----------------------------------------------------------------------
+    # SOURCE REGISTRY
+    # -----------------------------------------------------------------------
+    def register_source(self, name: str, adapter: Any) -> None:
+        key = str(name).strip().lower()
+        if not key:
+            raise ValueError("Source name cannot be empty.")
+        if not callable(adapter):
+            raise TypeError("Source adapter must be callable.")
+        self.external_sources[key] = adapter
+
+    def available_sources(self) -> List[str]:
+        return sorted(
+            key
+            for key, adapter in self.external_sources.items()
+            if callable(adapter)
+        )
+
+    # -----------------------------------------------------------------------
+    # STATISTICS
+    # -----------------------------------------------------------------------
+    def stats(self) -> Dict[str, Any]:
+        return {
+            "pages_crawled": self.pages_crawled,
+            "pages_cached": self.pages_cached,
+            "pages_unchanged": self.pages_unchanged,
+            "documents_indexed": self.documents_indexed,
+            "tokens_indexed": self.tokens_indexed,
+            "external_requests": self.external_requests,
+            "external_documents": self.external_documents,
+            "video_sources": self.video_sources,
+            "transcripts_acquired": self.transcripts_acquired,
+            "scheduled_jobs": self.scheduled_jobs,
+            "scheduler_runs": self.scheduler_runs,
+            "available_sources": self.available_sources(),
+        }
+
+
+# ===========================================================================
+# DEVELOPMENT TEST
+# ===========================================================================
+if __name__ == "__main__":
+    print("CoMpaNeoN WebCrawler")
+    print("WebCrawler requires a shared MemoryGrid instance.")p
