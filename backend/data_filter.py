@@ -794,4 +794,293 @@ class DataFilter:
 
         return result
 
-    # =========================
+    # ========================================================================
+    # FILTER ONE RECORD
+    # ========================================================================
+
+    def filter_record(
+        self,
+        record: Mapping[str, Any],
+        lang: str = "en",
+    ) -> Dict[str, Any]:
+        """
+        Recognize and admit one incoming knowledge record.
+        """
+
+        if not isinstance(
+            record,
+            Mapping,
+        ):
+
+            return {
+                "accepted": False,
+                "training_worthy": False,
+                "reason": (
+                    "record must be a mapping"
+                ),
+            }
+
+        # ------------------------------------------------------------------
+        # RESOLVE TEXT
+        # ------------------------------------------------------------------
+
+        text = _clean_text(
+            record.get(
+                "text"
+            )
+            or record.get(
+                "content"
+            )
+            or record.get(
+                "data"
+            )
+        )
+
+        # ------------------------------------------------------------------
+        # RESOLVE METADATA
+        # ------------------------------------------------------------------
+
+        metadata = _metadata(
+            record
+        )
+
+        # Preserve important top-level context fields.
+
+        context_keys = (
+            "source",
+            "lang",
+            "language",
+            "domain",
+            "project_id",
+            "project",
+            "project_trace",
+            "project_pin",
+            "project_iteration",
+            "project_context",
+            "project_context_aware",
+            "hierarchy",
+            "role",
+            "relevancy",
+            "state",
+            "partition",
+            "source_factor",
+            "weight",
+        )
+
+        for key in context_keys:
+
+            if (
+                key in record
+                and key not in metadata
+            ):
+
+                metadata[key] = record.get(
+                    key
+                )
+
+        # ------------------------------------------------------------------
+        # RECOGNIZE
+        # ------------------------------------------------------------------
+
+        recognized = self.recognize(
+            text=text,
+            lang=lang,
+            metadata=metadata,
+        )
+
+        # ------------------------------------------------------------------
+        # PRESERVE PRE-EXISTING TOKENIZER OUTPUT
+        # ------------------------------------------------------------------
+
+        supplied_tokens = record.get(
+            "tokens"
+        )
+
+        if (
+            isinstance(
+                supplied_tokens,
+                list,
+            )
+            and supplied_tokens
+        ):
+
+            recognized[
+                "tokens"
+            ] = _normalize_tokens(
+                supplied_tokens
+            )
+
+        # ------------------------------------------------------------------
+        # ADMISSION DECISION
+        # ------------------------------------------------------------------
+
+        accepted = self.is_training_worthy(
+            recognized
+        )
+
+        recognized[
+            "accepted"
+        ] = accepted
+
+        recognized[
+            "training_worthy"
+        ] = accepted
+
+        # ------------------------------------------------------------------
+        # GRIDCV PACKAGE
+        # ------------------------------------------------------------------
+
+        if accepted:
+
+            recognized[
+                "gridcv"
+            ] = self.build_gridcv_context(
+                recognized
+            )
+
+            recognized[
+                "filter_reason"
+            ] = (
+                "recognized training-worthy material"
+            )
+
+        else:
+
+            recognized[
+                "gridcv"
+            ] = {}
+
+            recognized[
+                "filter_reason"
+            ] = (
+                "no training-worthy lexical or "
+                "recognition signal"
+            )
+
+        return recognized
+
+    # ========================================================================
+    # FILTER MULTIPLE RECORDS
+    # ========================================================================
+
+    def filter_records(
+        self,
+        records: Iterable[Mapping[str, Any]],
+        lang: str = "en",
+    ) -> List[Dict[str, Any]]:
+        """
+        Filter a collection while preserving admission order.
+        """
+
+        accepted: List[Dict[str, Any]] = []
+
+        for record in records:
+
+            result = self.filter_record(
+                record,
+                lang=lang,
+            )
+
+            if result.get(
+                "accepted"
+            ):
+
+                accepted.append(
+                    result
+                )
+
+        return accepted
+
+    # ========================================================================
+    # FILTER RAW TEXT
+    # ========================================================================
+
+    def filter_text(
+        self,
+        text: str,
+        lang: str = "en",
+        metadata: Optional[
+            Mapping[str, Any]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Convenience API for filtering one text item.
+        """
+
+        return self.filter_record(
+            {
+                "text": text,
+
+                "metadata": dict(
+                    metadata or {}
+                ),
+            },
+            lang=lang,
+        )
+
+
+# ============================================================================
+# MODULE-LEVEL API
+# ============================================================================
+
+_default_filter = DataFilter()
+
+
+def filter_record(
+    record: Mapping[str, Any],
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """
+    Module-level single-record admission helper.
+    """
+
+    return _default_filter.filter_record(
+        record,
+        lang=lang,
+    )
+
+
+def filter_records(
+    records: Iterable[Mapping[str, Any]],
+    lang: str = "en",
+) -> List[Dict[str, Any]]:
+    """
+    Module-level batch admission helper.
+    """
+
+    return _default_filter.filter_records(
+        records,
+        lang=lang,
+    )
+
+
+def filter_text(
+    text: str,
+    lang: str = "en",
+    metadata: Optional[
+        Mapping[str, Any]
+    ] = None,
+) -> Dict[str, Any]:
+    """
+    Module-level text admission helper.
+    """
+
+    return _default_filter.filter_text(
+        text,
+        lang=lang,
+        metadata=metadata,
+    )
+
+
+# ============================================================================
+# PUBLIC API
+# ============================================================================
+
+__all__ = [
+    "DataFilter",
+    "SOURCE_FACTORS",
+    "source_factor",
+    "filter_record",
+    "filter_records",
+    "filter_text",
+]
