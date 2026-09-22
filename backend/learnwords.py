@@ -1625,4 +1625,491 @@ class LearnWords:
             ),
         )
 
-    # =============================================================
+    # ========================================================================
+    # LEARN
+    # ========================================================================
+
+    def learn(
+        self,
+        text: str,
+        unit_type: str = "sentence",
+        record: Optional[
+            Mapping[str, Any]
+        ] = None,
+        category: str = "general",
+        language: Optional[str] = None,
+        feed_chain: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+
+        unit = self.build_unit(
+            text=text,
+            unit_type=unit_type,
+            record=record,
+            category=category,
+            language=language,
+        )
+
+        if unit is None:
+            return None
+
+        if feed_chain:
+
+            unit[
+                "word_chain"
+            ] = self.feed_word_chain(
+                unit
+            )
+
+        return unit
+
+    # ========================================================================
+    # LEARN DATAFILTER RECORD
+    # ========================================================================
+
+    def learn_record(
+        self,
+        record: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+
+        if not isinstance(
+            record,
+            Mapping,
+        ):
+            return []
+
+        if record.get(
+            "accepted",
+            True,
+        ) is False:
+
+            return []
+
+        text = str(
+            record.get(
+                "text",
+                record.get(
+                    "content",
+                    record.get(
+                        "data",
+                        "",
+                    ),
+                ),
+            )
+            or ""
+        ).strip()
+
+        if not text:
+            return []
+
+        language = (
+            record.get(
+                "language"
+            )
+            or record.get(
+                "lang"
+            )
+            or detect_language(
+                text
+            )
+        )
+
+        category = str(
+            record.get(
+                "domain",
+                "general",
+            )
+            or "general"
+        )
+
+        unit_type = record.get(
+            "unit_type"
+        )
+
+        if unit_type not in self.UNIT_TYPES:
+
+            # DataFilter normally supplies text that represents a
+            # sentence or paragraph. Preserve it as sentence material
+            # unless explicitly identified otherwise.
+            unit_type = (
+                "paragraph"
+                if len(
+                    text.split()
+                ) >= 30
+                else "sentence"
+            )
+
+        unit = self.learn(
+            text=text,
+            unit_type=unit_type,
+            record=record,
+            category=category,
+            language=language,
+        )
+
+        return (
+            [unit]
+            if unit
+            else []
+        )
+
+    # ========================================================================
+    # BATCH
+    # ========================================================================
+
+    def learn_records(
+        self,
+        records: Iterable[
+            Mapping[str, Any]
+        ],
+    ) -> List[Dict[str, Any]]:
+
+        results = []
+
+        for record in records:
+
+            results.extend(
+                self.learn_record(
+                    record
+                )
+            )
+
+        return results
+
+    # ========================================================================
+    # CLASSIC CORPUS
+    # ========================================================================
+
+    def load_classic_samples(
+        self,
+        categories: Optional[
+            Iterable[str]
+        ] = None,
+        language: str = "en",
+    ) -> List[Dict[str, Any]]:
+
+        if categories is None:
+
+            selected = list(
+                CLASSIC_LEARNING_BLOCKS.keys()
+            )
+
+        else:
+
+            selected = [
+                category
+                for category in categories
+                if category
+                in CLASSIC_LEARNING_BLOCKS
+            ]
+
+        results = []
+
+        for category in selected:
+
+            block = CLASSIC_LEARNING_BLOCKS[
+                category
+            ]
+
+            record = {
+
+                "source": "classic_learning",
+
+                "source_factor": 1.0,
+
+                "language": language,
+
+                "domain": category,
+
+                "metadata": {
+                    "learning_style": "classic",
+                    "corpus": "foundational",
+                    "category": category,
+                },
+
+            }
+
+            for word in block.get(
+                "words",
+                [],
+            ):
+
+                unit = self.learn(
+                    word,
+                    "word",
+                    record,
+                    category,
+                    language,
+                )
+
+                if unit:
+                    results.append(unit)
+
+            for phrase in block.get(
+                "phrases",
+                [],
+            ):
+
+                unit = self.learn(
+                    phrase,
+                    "phrase",
+                    record,
+                    category,
+                    language,
+                )
+
+                if unit:
+                    results.append(unit)
+
+            for sentence in block.get(
+                "sentences",
+                [],
+            ):
+
+                unit = self.learn(
+                    sentence,
+                    "sentence",
+                    record,
+                    category,
+                    language,
+                )
+
+                if unit:
+                    results.append(unit)
+
+            for paragraph in block.get(
+                "paragraphs",
+                [],
+            ):
+
+                unit = self.learn(
+                    paragraph,
+                    "paragraph",
+                    record,
+                    category,
+                    language,
+                )
+
+                if unit:
+                    results.append(unit)
+
+        return results
+
+    # ========================================================================
+    # LOOKUPS
+    # ========================================================================
+
+    def find_word(
+        self,
+        word: str,
+    ) -> List[Dict[str, Any]]:
+
+        return list(
+            self.word_index.get(
+                str(word).strip().lower(),
+                [],
+            )
+        )
+
+    def find_phrase(
+        self,
+        phrase: str,
+    ) -> List[Dict[str, Any]]:
+
+        return list(
+            self.phrase_index.get(
+                str(phrase).strip().lower(),
+                [],
+            )
+        )
+
+    def find_sentence(
+        self,
+        sentence: str,
+    ) -> List[Dict[str, Any]]:
+
+        return list(
+            self.sentence_index.get(
+                str(sentence).strip().lower(),
+                [],
+            )
+        )
+
+    # ========================================================================
+    # LANGUAGE PROFILE
+    # ========================================================================
+
+    def language_profile(
+        self,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        if language:
+
+            lang = normalize_lang(
+                language
+            )
+
+            structures = (
+                self.language_structures.get(
+                    lang,
+                    [],
+                )
+            )
+
+            return {
+
+                "language": lang,
+
+                "units": len(
+                    structures
+                ),
+
+                "tokens": sum(
+                    item.get(
+                        "token_count",
+                        0,
+                    )
+                    for item in structures
+                ),
+
+                "lexical_tokens": sum(
+                    item.get(
+                        "lexical_count",
+                        0,
+                    )
+                    for item in structures
+                ),
+
+            }
+
+        return {
+
+            lang: {
+                "units": len(
+                    structures
+                ),
+                "tokens": sum(
+                    item.get(
+                        "token_count",
+                        0,
+                    )
+                    for item in structures
+                ),
+                "lexical_tokens": sum(
+                    item.get(
+                        "lexical_count",
+                        0,
+                    )
+                    for item in structures
+                ),
+            }
+
+            for lang, structures
+            in self.language_structures.items()
+        }
+
+    # ========================================================================
+    # SYSTEM PROFILE
+    # ========================================================================
+
+    def profile(self) -> Dict[str, Any]:
+
+        return {
+
+            "total_units": len(
+                self.units
+            ),
+
+            "words": len(
+                self.word_index
+            ),
+
+            "phrases": len(
+                self.phrase_index
+            ),
+
+            "sentences": len(
+                self.sentence_index
+            ),
+
+            "paragraphs": len(
+                self.paragraph_index
+            ),
+
+            "languages": self.language_profile(),
+
+            "statistics": dict(
+                self.statistics
+            ),
+
+            "word_chain": {
+                "words": sum(
+                    self.word_chain.word_frequency.values()
+                ),
+
+                "pairs": sum(
+                    self.word_chain.pairs.values()
+                ),
+
+                "languages": dict(
+                    self.word_chain.language_statistics
+                ),
+            },
+
+        }
+
+
+# ============================================================================
+# SIMPLE FACTORY
+# ============================================================================
+
+def create_learn_words(
+    word_chain: Optional[
+        WordChain
+    ] = None,
+    load_classic: bool = False,
+) -> LearnWords:
+
+    learner = LearnWords(
+        word_chain=word_chain
+    )
+
+    if load_classic:
+
+        learner.load_classic_samples()
+
+    return learner
+
+
+# ============================================================================
+# SIMPLE BATCH HELPER
+# ============================================================================
+
+def learn_words(
+    records: Iterable[
+        Mapping[str, Any]
+    ],
+    word_chain: Optional[
+        WordChain
+    ] = None,
+) -> List[Dict[str, Any]]:
+
+    learner = LearnWords(
+        word_chain=word_chain
+    )
+
+    return learner.learn_records(
+        records
+    )
+
+
+__all__ = [
+    "LearnWords",
+    "CLASSIC_LEARNING_BLOCKS",
+    "CANONICAL_ABBREVIATIONS",
+    "IRRELEVANT_ABBREVIATIONS",
+    "detect_language",
+    "build_language_structure",
+    "create_learn_words",
+    "learn_words",
+]
