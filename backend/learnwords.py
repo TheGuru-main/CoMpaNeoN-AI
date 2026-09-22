@@ -719,7 +719,6 @@ def detect_language(text: str) -> str:
     except Exception:
         return "en"
 
-
 # ============================================================================
 # TEXT / ABBREVIATION HELPERS
 # ============================================================================
@@ -743,4 +742,887 @@ def _surface_word(
 ) -> str:
 
     return str(
-        token.
+        token.get(
+            "original",
+            token.get(
+                "word",
+                "",
+            ),
+        )
+        or ""
+    ).strip()
+
+
+def _canonical_word(
+    token: Mapping[str, Any],
+) -> str:
+
+    """
+    tokenizer.py is authoritative.
+
+    normalized = canonical lexical form.
+
+    stem is preserved separately and is NOT used as the canonical
+    spelling because the original normalized lexical identity must
+    remain available.
+    """
+
+    return str(
+        token.get(
+            "normalized",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+
+def _is_abbreviation(
+    surface: str,
+    canonical: str,
+) -> bool:
+
+    if not surface:
+        return False
+
+    if _DOTTED_ABBREVIATION_RE.match(
+        surface
+    ):
+        return True
+
+    if _LATIN_ABBREVIATION_RE.match(
+        surface
+    ):
+        return canonical.isascii()
+
+    return False
+
+
+def _keep_abbreviation(
+    surface: str,
+    canonical: str,
+    metadata: Mapping[str, Any],
+) -> bool:
+
+    # Explicit caller override.
+    if metadata.get(
+        "keep_abbreviations"
+    ) is True:
+        return True
+
+    if canonical in CANONICAL_ABBREVIATIONS:
+        return True
+
+    if canonical in IRRELEVANT_ABBREVIATIONS:
+        return False
+
+    # DataFilter may have already recognized a code or technical term.
+    if canonical in {
+        str(x).lower()
+        for x in (
+            metadata.get(
+                "code_terms",
+                []
+            )
+            if isinstance(
+                metadata.get(
+                    "code_terms",
+                    []
+                ),
+                list,
+            )
+            else []
+        )
+    }:
+        return True
+
+    # An explicitly recognized symbol/code/domain term survives.
+    if metadata.get(
+        "technical_term"
+    ):
+        return True
+
+    if metadata.get(
+        "code_term"
+    ):
+        return True
+
+    # Unknown abbreviation: do not make it a canonical learning word.
+    return False
+
+
+def _is_valid_canonical_word(
+    token: Mapping[str, Any],
+    language: str,
+    metadata: Mapping[str, Any],
+) -> bool:
+
+    canonical = _canonical_word(
+        token
+    )
+
+    surface = _surface_word(
+        token
+    )
+
+    if not canonical:
+        return False
+
+    # ------------------------------------------------------------
+    # Pure symbol/numeric material does not become a canonical word.
+    # ------------------------------------------------------------
+
+    if not any(
+        ch.isalpha()
+        for ch in canonical
+    ):
+        return False
+
+    # ------------------------------------------------------------
+    # Abbreviations are explicitly controlled.
+    # ------------------------------------------------------------
+
+    if _is_abbreviation(
+        surface,
+        canonical,
+    ):
+
+        return _keep_abbreviation(
+            surface,
+            canonical,
+            metadata,
+        )
+
+    # ------------------------------------------------------------
+    # Non-word tokens should not become canonical words.
+    # ------------------------------------------------------------
+
+    if not _WORDLIKE_RE.match(
+        canonical
+    ):
+
+        # Some writing systems do not behave like Latin words.
+        # tokenizer.py has already established the lexical identity,
+        # so allow such tokens when they contain alphabetic characters.
+        if not any(
+            ch.isalpha()
+            for ch in canonical
+        ):
+            return False
+
+    # ------------------------------------------------------------
+    # Language-aware single-character handling.
+    # ------------------------------------------------------------
+
+    if len(canonical) == 1:
+
+        # Never globally reject single-character lexical units.
+        # Chinese/Japanese/Arabic/etc. may legitimately use them.
+        if language in {
+            "zh",
+            "ja",
+            "ko",
+            "ar",
+            "fa",
+            "ur",
+            "he",
+            "th",
+        }:
+            return True
+
+        # Latin single-letter tokens are generally not canonical words
+        # unless explicitly marked by the source.
+        if canonical not in {
+            "a",
+            "i",
+        } and not metadata.get(
+            "allow_single_letter"
+        ):
+            return False
+
+    return True
+
+
+# ============================================================================
+# LANGUAGE STRUCTURE
+# ============================================================================
+
+def build_language_structure(
+    text: str,
+    language: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build a language-neutral structural representation.
+
+    This does NOT pretend to implement full grammatical parsing.
+
+    It preserves the information needed for later linguistic learning:
+
+        original order
+        canonical lexical order
+        surface forms
+        stems
+        punctuation
+        token positions
+        token count
+        lexical count
+        language
+        script/character profile
+
+    WordUnderstanding can later add deeper semantic/grammatical analysis.
+    """
+
+    lang = normalize_lang(
+        language
+        or detect_language(text)
+    )
+
+    tokens = tokenize(
+        text,
+        lang,
+    )
+
+    structures = []
+
+    canonical_sequence = []
+    surface_sequence = []
+
+    punctuation = []
+
+    for index, token in enumerate(
+        tokens
+    ):
+
+        canonical = _canonical_word(
+            token
+        )
+
+        surface = _surface_word(
+            token
+        )
+
+        stem = str(
+            token.get(
+                "stem",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        canonical_sequence.append(
+            canonical
+        )
+
+        surface_sequence.append(
+            surface
+        )
+
+        symbols = token.get(
+            "symbols",
+            [],
+        )
+
+        if symbols:
+            punctuation.extend(
+                symbols
+                if isinstance(
+                    symbols,
+                    list,
+                )
+                else [symbols]
+            )
+
+        structures.append({
+
+            "position": index,
+
+            "surface": surface,
+
+            "canonical": canonical,
+
+            "stem": stem,
+
+            "uid": token.get(
+                "uid"
+            ),
+
+            "uid_sequence": token.get(
+                "uid_sequence",
+                [],
+            ),
+
+            "L": token.get(
+                "L",
+                0,
+            ),
+
+            "S": token.get(
+                "S",
+                0,
+            ),
+
+            "SC": token.get(
+                "SC",
+                0,
+            ),
+
+            "word_grid": token.get(
+                "word",
+                {},
+            ),
+
+            "symbols": symbols,
+
+        })
+
+    return {
+
+        "language": lang,
+
+        "detected_language": lang,
+
+        "text": text,
+
+        "tokens": structures,
+
+        "canonical_sequence": [
+            x
+            for x in canonical_sequence
+            if x
+        ],
+
+        "surface_sequence": [
+            x
+            for x in surface_sequence
+            if x
+        ],
+
+        "token_count": len(
+            tokens
+        ),
+
+        "lexical_count": sum(
+            1
+            for token in structures
+            if token["canonical"]
+        ),
+
+        "punctuation": punctuation,
+
+        "structure": [
+            token["canonical"]
+            for token in structures
+            if token["canonical"]
+        ],
+
+    }
+
+
+# ============================================================================
+# LEARNWORDS
+# ============================================================================
+
+class LearnWords:
+
+    UNIT_TYPES = (
+        "word",
+        "phrase",
+        "sentence",
+        "paragraph",
+    )
+
+    def __init__(
+        self,
+        word_chain: Optional[WordChain] = None,
+    ):
+
+        self.word_chain = (
+            word_chain
+            if word_chain is not None
+            else WordChain()
+        )
+
+        self.units = []
+
+        self.word_index = defaultdict(
+            list
+        )
+
+        self.phrase_index = defaultdict(
+            list
+        )
+
+        self.sentence_index = defaultdict(
+            list
+        )
+
+        self.paragraph_index = defaultdict(
+            list
+        )
+
+        self.language_structures = defaultdict(
+            list
+        )
+
+        self.statistics = Counter()
+
+    # ========================================================================
+    # TOKENIZER
+    # ========================================================================
+
+    def tokenize_unit(
+        self,
+        text: str,
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+
+        lang = normalize_lang(
+            language
+            or detect_language(text)
+        )
+
+        tokens = tokenize(
+            text,
+            lang,
+        )
+
+        return {
+
+            "language": lang,
+
+            "tokens": tokens,
+
+            "structure": build_language_structure(
+                text,
+                lang,
+            ),
+
+        }
+
+    # ========================================================================
+    # CANONICAL WORD EXTRACTION
+    # ========================================================================
+
+    def canonical_words(
+        self,
+        text: str,
+        language: Optional[str] = None,
+        metadata: Optional[
+            Mapping[str, Any]
+        ] = None,
+    ) -> List[Dict[str, Any]]:
+
+        metadata = dict(
+            metadata or {}
+        )
+
+        lang = normalize_lang(
+            language
+            or detect_language(text)
+        )
+
+        tokens = tokenize(
+            text,
+            lang,
+        )
+
+        result = []
+
+        for position, token in enumerate(
+            tokens
+        ):
+
+            canonical = _canonical_word(
+                token
+            )
+
+            surface = _surface_word(
+                token
+            )
+
+            if not _is_valid_canonical_word(
+                token,
+                lang,
+                metadata,
+            ):
+                continue
+
+            result.append({
+
+                "position": position,
+
+                "surface": surface,
+
+                "canonical": canonical,
+
+                "stem": str(
+                    token.get(
+                        "stem",
+                        "",
+                    )
+                    or ""
+                ).strip().lower(),
+
+                "language": lang,
+
+                "uid": token.get(
+                    "uid"
+                ),
+
+                "uid_sequence": list(
+                    token.get(
+                        "uid_sequence",
+                        [],
+                    )
+                    or []
+                ),
+
+                "L": token.get(
+                    "L",
+                    0,
+                ),
+
+                "S": token.get(
+                    "S",
+                    0,
+                ),
+
+                "SC": token.get(
+                    "SC",
+                    0,
+                ),
+
+                "word": token.get(
+                    "word",
+                    {},
+                ),
+
+                "symbols": token.get(
+                    "symbols",
+                    [],
+                ),
+
+            })
+
+        return result
+
+    # ========================================================================
+    # BUILD UNIT
+    # ========================================================================
+
+    def build_unit(
+        self,
+        text: str,
+        unit_type: str,
+        record: Optional[
+            Mapping[str, Any]
+        ] = None,
+        category: str = "general",
+        language: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+
+        if not text or not str(
+            text
+        ).strip():
+
+            return None
+
+        if unit_type not in self.UNIT_TYPES:
+            raise ValueError(
+                f"Unsupported learning unit: {unit_type}"
+            )
+
+        record = dict(
+            record or {}
+        )
+
+        # ------------------------------------------------------------
+        # Resolve language.
+        # ------------------------------------------------------------
+
+        lang = normalize_lang(
+            language
+            or record.get(
+                "language"
+            )
+            or record.get(
+                "lang"
+            )
+            or detect_language(
+                text
+            )
+        )
+
+        # ------------------------------------------------------------
+        # TOKENIZER IS CALLED HERE.
+        # ------------------------------------------------------------
+
+        token_result = self.tokenize_unit(
+            text,
+            lang,
+        )
+
+        tokens = token_result[
+            "tokens"
+        ]
+
+        # ------------------------------------------------------------
+        # Canonical lexical layer.
+        # ------------------------------------------------------------
+
+        words = self.canonical_words(
+            text,
+            lang,
+            record,
+        )
+
+        # ------------------------------------------------------------
+        # A unit containing no usable lexical material is not learned.
+        # ------------------------------------------------------------
+
+        if not words:
+
+            # For some scripts the tokenizer may legitimately provide
+            # structural/symbolic material. Keep sentence/paragraph
+            # structure only when there are actual tokenizer tokens.
+            if not tokens:
+                return None
+
+        unit = {
+
+            "text": str(
+                text
+            ).strip(),
+
+            "unit_type": unit_type,
+
+            "language": lang,
+
+            "detected_language": lang,
+
+            "category": category,
+
+            "source": record.get(
+                "source",
+                "classic_learning",
+            ),
+
+            "source_factor": record.get(
+                "source_factor",
+                1.0,
+            ),
+
+            # --------------------------------------------------------
+            # Canonical words.
+            # --------------------------------------------------------
+
+            "words": words,
+
+            "canonical_words": [
+                word[
+                    "canonical"
+                ]
+                for word in words
+            ],
+
+            # --------------------------------------------------------
+            # Full tokenizer output.
+            # --------------------------------------------------------
+
+            "tokens": tokens,
+
+            # --------------------------------------------------------
+            # Multilingual structure.
+            # --------------------------------------------------------
+
+            "language_structure": token_result[
+                "structure"
+            ],
+
+            "structure": token_result[
+                "structure"
+            ][
+                "structure"
+            ],
+
+            # --------------------------------------------------------
+            # Context.
+            # --------------------------------------------------------
+
+            "domain": record.get(
+                "domain",
+                category,
+            ),
+
+            "intent": record.get(
+                "intent"
+            ),
+
+            "question_type": record.get(
+                "question_type"
+            ),
+
+            "directive": record.get(
+                "directive"
+            ),
+
+            "project_id": record.get(
+                "project_id"
+            ),
+
+            "project": record.get(
+                "project"
+            ),
+
+            "project_trace": record.get(
+                "project_trace"
+            ),
+
+            "project_pin": record.get(
+                "project_pin"
+            ),
+
+            "project_iteration": record.get(
+                "project_iteration"
+            ),
+
+            "project_context_aware": record.get(
+                "project_context_aware"
+            ),
+
+            "metadata": record.get(
+                "metadata",
+                {},
+            ),
+
+        }
+
+        # ------------------------------------------------------------
+        # Index.
+        # ------------------------------------------------------------
+
+        self.units.append(
+            unit
+        )
+
+        self.statistics[
+            unit_type
+        ] += 1
+
+        self.statistics[
+            f"language:{lang}"
+        ] += 1
+
+        self.statistics[
+            f"category:{category}"
+        ] += 1
+
+        # ------------------------------------------------------------
+        # Index canonical words.
+        # ------------------------------------------------------------
+
+        if unit_type == "word":
+
+            for word in words:
+
+                self.word_index[
+                    word[
+                        "canonical"
+                    ]
+                ].append(
+                    unit
+                )
+
+        elif unit_type == "phrase":
+
+            self.phrase_index[
+                str(text).lower()
+            ].append(
+                unit
+            )
+
+        elif unit_type == "sentence":
+
+            self.sentence_index[
+                str(text).lower()
+            ].append(
+                unit
+            )
+
+        elif unit_type == "paragraph":
+
+            self.paragraph_index[
+                str(text).lower()
+            ].append(
+                unit
+            )
+
+        self.language_structures[
+            lang
+        ].append(
+            unit[
+                "language_structure"
+            ]
+        )
+
+        return unit
+
+    # ========================================================================
+    # WORDCHAIN
+    # ========================================================================
+
+    def feed_word_chain(
+        self,
+        unit: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+
+        text = unit.get(
+            "text",
+            "",
+        )
+
+        if not text:
+            return {}
+
+        source = unit.get(
+            "source",
+            "conversation",
+        )
+
+        # WordChain itself calls tokenizer.py again and performs its
+        # language detection when language is supplied/omitted.
+        #
+        # We explicitly pass language so the language already resolved
+        # by LearnWords is preserved.
+
+        return self.word_chain.add_text(
+            text=text,
+            source=source,
+            metadata={
+                "unit_type": unit.get(
+                    "unit_type"
+                ),
+                "category": unit.get(
+                    "category"
+                ),
+                "domain": unit.get(
+                    "domain"
+                ),
+                "language": unit.get(
+                    "language"
+                ),
+                "project_id": unit.get(
+                    "project_id"
+                ),
+                "project": unit.get(
+                    "project"
+                ),
+                "project_trace": unit.get(
+                    "project_trace"
+                ),
+            },
+            language=unit.get(
+                "language"
+            ),
+        )
+
+    # =============================================================
