@@ -765,4 +765,223 @@ class Analyze:
         ):
             tools.append("legal_research")
 
-        # Coding environmen
+        # Coding environment
+        if (
+            question_approach == "build"
+            or domain in ("coding", "programming", "software")
+            or any(
+                x in q
+                for x in (
+                    "code",
+                    "python",
+                    "javascript",
+                    "html",
+                    "css",
+                    "debug",
+                    "compile",
+                    "run",
+                    "test",
+                )
+            )
+        ):
+            tools.extend(
+                [
+                    "coding_sandbox",
+                    "console",
+                    "tree_sitter",
+                    "lsp",
+                ]
+            )
+
+        # Visual explanation
+        if any(
+            x in q
+            for x in (
+                "diagram",
+                "draw",
+                "illustrate",
+                "visualize",
+                "architecture",
+                "flowchart",
+                "image",
+            )
+        ):
+            tools.append("visual")
+
+        # Project-aware operations
+        if project_context:
+            tools.append("project_context")
+
+        return self._unique(tools)
+
+    # ------------------------------------------------------------------
+    # REASONING PATH
+    # ------------------------------------------------------------------
+
+    def _reasoning_path(
+        self,
+        question_type: str,
+        question_approach: str,
+        domain: str,
+        intent: str,
+        required_knowledge: List[str],
+        required_tools: List[str],
+    ) -> List[str]:
+
+        path = [
+            "parse_request",
+            "identify_intent",
+            "identify_question_type",
+            "select_question_approach",
+        ]
+
+        if domain:
+            path.append(
+                "activate_domain_context"
+            )
+
+        if required_knowledge:
+            path.append(
+                "retrieve_required_knowledge"
+            )
+
+        if required_tools:
+            path.append(
+                "select_required_tools"
+            )
+
+        if question_approach == "comparative":
+            path.append(
+                "compare_evidence"
+            )
+
+        elif question_approach == "causal_reasoning":
+            path.append(
+                "construct_causal_chain"
+            )
+
+        elif question_approach == "procedural":
+            path.append(
+                "construct_procedure"
+            )
+
+        elif question_approach == "build":
+            path.extend(
+                [
+                    "inspect_project_context",
+                    "construct_implementation_plan",
+                    "validate_implementation",
+                ]
+            )
+
+        elif question_approach == "legal_research":
+            path.extend(
+                [
+                    "identify_jurisdiction",
+                    "identify_authority",
+                    "retrieve_authoritative_sources",
+                    "validate_source_context",
+                ]
+            )
+
+        elif question_approach == "rule_evaluation":
+            path.extend(
+                [
+                    "identify_applicable_rules",
+                    "evaluate_against_rules",
+                ]
+            )
+
+        elif question_approach == "research":
+            path.extend(
+                [
+                    "retrieve_external_sources",
+                    "evaluate_source_relevance",
+                    "synthesize_evidence",
+                ]
+            )
+
+        else:
+            path.append(
+                "construct_direct_answer"
+            )
+
+        path.extend(
+            [
+                "validate_constraints",
+                "prepare_response",
+            ]
+        )
+
+        return self._unique(path)
+
+    # ------------------------------------------------------------------
+    # HELPERS
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _unique(items):
+
+        seen = set()
+        output = []
+
+        for item in items:
+
+            key = str(item)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            output.append(item)
+
+        return output
+
+    @staticmethod
+    def _empty_result():
+
+        return {
+            "query": "",
+            "language": "en",
+            "intent": "",
+            "intent_analysis": {},
+            "question_type": "general",
+            "question_approach": "direct_answer",
+            "directives": {
+                "items": [],
+            },
+            "domain": "",
+            "domain_rules": {},
+            "entities": [],
+            "symbols": [],
+            "linguistic": {},
+            "project_context": {},
+            "required_knowledge": [],
+            "required_tools": [],
+            "reasoning_path": [],
+            "previous_context": {},
+        }
+
+
+# ----------------------------------------------------------------------
+# FUNCTIONAL API
+# ----------------------------------------------------------------------
+
+_default_analyzer = Analyze()
+
+
+def analyze(
+    query: str,
+    language: Optional[str] = None,
+    project_context: Optional[Dict[str, Any]] = None,
+    workspace_context: Optional[Dict[str, Any]] = None,
+    previous_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+
+    return _default_analyzer.analyze(
+        query=query,
+        language=language,
+        project_context=project_context,
+        workspace_context=workspace_context,
+        previous_context=previous_context,
+    )
